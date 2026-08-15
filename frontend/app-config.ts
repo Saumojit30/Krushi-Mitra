@@ -33,9 +33,9 @@ export interface AppConfig {
 }
 
 export const APP_CONFIG_DEFAULTS: AppConfig = {
-  companyName: 'Murf AI',
-  pageTitle: 'Voice Agent Starter',
-  pageDescription: 'A voice agent powered by Murf Falcon — the fastest TTS API',
+  companyName: 'Krushi Mitra',
+  pageTitle: 'Krushi Mitra — Shetkaryasathi Voice Advisor',
+  pageDescription: 'Vidarbhyatil Kapas Shetkaryansathi Vishwasarha Sahayak | Trusted voice advisor for cotton farmers of Vidarbha, Maharashtra',
 
   supportsChatInput: true,
   supportsVideoInput: true,
@@ -43,10 +43,15 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   isPreConnectBufferEnabled: true,
 
   logo: '/murf-logo.svg',
-  accent: '#6366F1',
+  accent: '#2d6a4f',        // Deep green — agriculture
   logoDark: '/murf-logo-dark.svg',
-  accentDark: '#818cf8',
-  startButtonText: 'Start talking',
+  accentDark: '#52b788',   // Lighter green for dark mode
+  startButtonText: 'Bolnyas Suru Kara (Start Talking)',
+
+  // Audio visualizer — wave style for natural voice feel
+  audioVisualizerType: 'wave',
+  audioVisualizerColor: '#2d6a4f',
+  audioVisualizerColorDark: '#52b788',
 
   // optional: audio visualization configuration
   // audioVisualizerType: 'bar',
@@ -65,7 +70,7 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   // audioVisualizerType: 'aura',
 
   // agent dispatch configuration
-  agentName: process.env.AGENT_NAME ?? undefined,
+  agentName: process.env.AGENT_NAME ?? 'krushi-mitra',
 
   // LiveKit Cloud Sandbox configuration
   sandboxId: undefined,
