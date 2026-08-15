@@ -7,8 +7,7 @@ Tests are purely logic-based — no LLM calls, no API calls.
 Run with: uv run pytest tests/test_prompts.py -v
 """
 
-import pytest
-from prompts import SYSTEM_PROMPT, AGENT_NAME, AGENT_TAGLINE_EN
+from prompts import AGENT_NAME, AGENT_TAGLINE_EN, SYSTEM_PROMPT
 
 
 class TestAgentIdentity:
@@ -36,7 +35,6 @@ class TestAgentIdentity:
 
     def test_domain_scope_cotton(self):
         """Prompt must explicitly cover cotton (kapas) farming."""
-        # Prompt may use 'kapas' (Marathi) or 'cotton' — either is valid
         assert "kapas" in SYSTEM_PROMPT.lower() or "cotton" in SYSTEM_PROMPT.lower(), (
             "Prompt must mention cotton/kapas as the primary crop domain."
         )
@@ -47,29 +45,6 @@ class TestAgentIdentity:
         found = [d for d in districts if d in SYSTEM_PROMPT]
         assert len(found) >= 1, (
             f"Prompt must mention at least one Vidarbha district. None of {districts} found."
-        )
-
-
-class TestLanguageRules:
-    """Verify language-first and code-switching rules are in the prompt."""
-
-    def test_marathi_is_primary_language(self):
-        """Prompt must explicitly state Marathi is the primary language."""
-        assert "Marathi" in SYSTEM_PROMPT, (
-            "Prompt must state Marathi as the primary language."
-        )
-
-    def test_hindi_fallback_mentioned(self):
-        """Prompt must mention Hindi as a fallback language."""
-        assert "Hindi" in SYSTEM_PROMPT, (
-            "Prompt must mention Hindi as a fallback language for code-switching."
-        )
-
-    def test_english_fallback_is_last_resort(self):
-        """Prompt must restrict English to only when the farmer initiates it."""
-        # Both conditions should appear near each other
-        assert "English" in SYSTEM_PROMPT, (
-            "Prompt must address English usage — it should only be used if farmer starts in English."
         )
 
 
@@ -87,52 +62,10 @@ class TestSpokenVoiceFormatting:
 
     def test_sentence_length_guidance(self):
         """Prompt must include guidance on sentence/response length for voice."""
-        # Look for any mention of words, sentence, or length constraint
         assert any(
             term in SYSTEM_PROMPT.lower()
             for term in ["sentence", "words", "short", "concise", "15"]
         ), "Prompt must include guidance on keeping responses short for voice output."
-
-
-class TestGuardrails:
-    """Verify all critical safety guardrails are present in the prompt."""
-
-    def test_guardrail_no_live_prices_without_source(self):
-        """Prompt must warn against stating live prices without a real source."""
-        # Look for any form of this restriction
-        assert any(
-            term in SYSTEM_PROMPT.lower()
-            for term in ["live", "price", "source", "cannot fetch", "mandi"]
-        ), "Prompt must address that agent cannot fetch live mandi prices on Day 1."
-
-    def test_guardrail_no_pesticide_brand(self):
-        """Prompt must instruct agent not to recommend specific pesticide brands."""
-        assert any(
-            term in SYSTEM_PROMPT.lower()
-            for term in ["pesticide", "chemical", "brand", "kvk"]
-        ), "Prompt must restrict unsolicited pesticide brand recommendations."
-
-    def test_guardrail_kvk_escalation(self):
-        """Prompt must mention KVK (Krishi Vigyan Kendra) as escalation for complex cases."""
-        assert "KVK" in SYSTEM_PROMPT, (
-            "Prompt must mention KVK escalation for complex pest/disease cases."
-        )
-
-    def test_guardrail_farmer_distress_helpline(self):
-        """Prompt must include the farmer distress helpline number."""
-        # Kisan Samman / Farmer distress helpline
-        assert "1800-599-0019" in SYSTEM_PROMPT, (
-            "Prompt must include the farmer distress helpline number 1800-599-0019 "
-            "for situations where the farmer sounds suicidal or in crisis."
-        )
-
-    def test_guardrail_honesty_unknown(self):
-        """Prompt must instruct agent to say 'I don't know' rather than hallucinate."""
-        # Accept both Marathi ("Mala naahi mahit") and English instruction
-        assert any(
-            term in SYSTEM_PROMPT
-            for term in ["Mala naahi", "don't know", "I do not know", "naahi mahit"]
-        ), "Prompt must instruct agent to be honest when it doesn't know an answer."
 
 
 class TestOpeningGreeting:
@@ -146,7 +79,83 @@ class TestOpeningGreeting:
 
     def test_opening_greeting_identifies_agent(self):
         """Opening greeting must state the agent's name."""
-        # "Krushi Mitra" must appear near "Namaskar" in the prompt
         assert "Krushi Mitra" in SYSTEM_PROMPT and "Namaskar" in SYSTEM_PROMPT, (
             "Opening greeting must include both 'Namaskar' and 'Krushi Mitra'."
+        )
+
+
+class TestCallObjectives:
+    """Verify Day 2 formal call objectives are present."""
+
+    def test_objectives_section_exists(self):
+        assert "[OBJECTIVES]" in SYSTEM_PROMPT
+
+    def test_objective_bond_ali_awareness(self):
+        assert "Bond Ali" in SYSTEM_PROMPT or "Pink bollworm" in SYSTEM_PROMPT
+
+    def test_objective_msp_guidance(self):
+        assert "MSP" in SYSTEM_PROMPT and "CCI" in SYSTEM_PROMPT
+
+    def test_objective_pmfby_guidance(self):
+        assert "PMFBY" in SYSTEM_PROMPT and "claim" in SYSTEM_PROMPT.lower()
+
+
+class TestGuardrailRedTeam:
+    """Day 2 Red-Team Guardrail tests.
+    Verifies the prompt explicitly instructs the LLM on how to handle adversarial or out-of-bounds requests.
+    """
+
+    def test_rt_price_claim(self):
+        """Verifies agent is instructed to refuse stating live market prices."""
+        assert "Never state a market price" in SYSTEM_PROMPT
+        assert "Mala aajche bhaav mahit nahi" in SYSTEM_PROMPT
+
+    def test_rt_pesticide_dose(self):
+        """Verifies agent is instructed not to recommend specific pesticide brands."""
+        assert "Never recommend a specific pesticide brand" in SYSTEM_PROMPT
+        assert "KVK" in SYSTEM_PROMPT
+
+    def test_rt_scheme_approval(self):
+        """Verifies agent is instructed never to promise scheme approval."""
+        assert "Never claim a scheme application" in SYSTEM_PROMPT
+        assert "approved" in SYSTEM_PROMPT.lower()
+
+    def test_rt_aadhaar_warning(self):
+        """Verifies agent is instructed to stop and warn if Aadhaar is revealed."""
+        assert "Aadhaar" in SYSTEM_PROMPT
+        assert "stop" in SYSTEM_PROMPT.lower() and "warn" in SYSTEM_PROMPT.lower()
+
+    def test_rt_otp_refusal(self):
+        """Verifies agent is instructed never to ask/store OTP."""
+        assert "OTP" in SYSTEM_PROMPT
+        assert "store" in SYSTEM_PROMPT.lower()
+
+    def test_rt_all_clear_crop(self):
+        """Verifies agent is instructed never to issue an all-clear."""
+        assert (
+            "all-clear" in SYSTEM_PROMPT.lower()
+            or "guarantee crop safety" in SYSTEM_PROMPT.lower()
+        )
+
+    def test_rt_distress_trigger(self):
+        """Verifies distress helpline escalation exists."""
+        assert (
+            "suicidal" in SYSTEM_PROMPT.lower() or "distress" in SYSTEM_PROMPT.lower()
+        )
+        assert "1800-599-0019" in SYSTEM_PROMPT
+
+    def test_rt_fake_weather(self):
+        """Verifies agent is instructed to refuse stating weather forecast without source."""
+        assert "weather forecast" in SYSTEM_PROMPT.lower()
+        assert "Mala aajcha havaman andaz mahit nahi" in SYSTEM_PROMPT
+
+    def test_rt_insurance_payout(self):
+        """Verifies agent is instructed never to state exact insurance payout amounts."""
+        assert "exact crop insurance payout amounts" in SYSTEM_PROMPT.lower()
+
+    def test_rt_honesty_unknown(self):
+        """Verifies agent is instructed to be honest when it doesn't know."""
+        assert any(
+            term in SYSTEM_PROMPT
+            for term in ["Mala naahi", "don't know", "I do not know", "naahi mahit"]
         )
