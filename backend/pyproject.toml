@@ -3,13 +3,13 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-starter-python"
+name = "krushi-mitra"
 version = "1.0.0"
-description = "Voice AI agent starter powered by Murf Falcon TTS and LiveKit Agents"
+description = "Krushi Mitra — Voice AI advisor for cotton farmers in Vidarbha, Maharashtra"
 requires-python = ">=3.10, <3.15"
 
 dependencies = [
-    "livekit-agents[deepgram,google,silero,turn-detector]~=1.4",
+    "livekit-agents[deepgram,openai,silero,turn-detector]~=1.4",
     "livekit-murf>=0.1.1",
     "livekit-plugins-noise-cancellation~=0.2",
     "python-dotenv",
@@ -19,6 +19,7 @@ dependencies = [
 dev = [
     "pytest",
     "pytest-asyncio",
+    "pytest-mock",
     "ruff",
 ]
 

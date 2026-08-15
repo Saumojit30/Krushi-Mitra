@@ -1,4 +1,11 @@
+"""
+Krushi Mitra — Main Voice Agent
+Cotton Farmer Advisory | Vidarbha, Maharashtra | Track: Farm & Field
+Day 1: Foundation — voice pipeline with Marathi Murf Falcon 2 TTS + Groq LLM
+"""
+
 import logging
+import os
 
 from dotenv import load_dotenv
 from livekit import rtc
@@ -9,114 +16,124 @@ from livekit.agents import (
     JobContext,
     JobProcess,
     cli,
-    inference,
-    tokenize,
     room_io,
+    tokenize,
 )
-from livekit.plugins import murf, silero, google, deepgram, noise_cancellation
+from livekit.plugins import deepgram, murf, noise_cancellation, silero
+from livekit.plugins import openai as lk_openai  # Groq uses OpenAI-compatible API
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
-logger = logging.getLogger("agent")
+from logger import LatencyTracker
+from prompts import AGENT_NAME, SYSTEM_PROMPT
 
+# Load env variables from .env.local (never committed to git)
 load_dotenv(".env.local")
 
-# Change this prompt to change what your voice agent does.
-# See README.md for example prompts (customer support, language tutor, receptionist).
-SYSTEM_PROMPT = """You are a friendly and efficient customer support agent for a tech company. Help users with account issues, billing questions, and product troubleshooting. Be concise, empathetic, and solution-oriented. If you don't know something, say so honestly and offer to escalate. Your responses are concise and without complex formatting, emojis, or symbols."""
+app_logger = logging.getLogger("krushi_mitra")
+
+# ---------------------------------------------------------------------------
+# Groq configuration (OpenAI-compatible endpoint)
+# Model: openai/gpt-oss-20b is the safe non-deprecated choice as of Aug 2026
+# Fallback: llama-3.3-70b-versatile
+# ---------------------------------------------------------------------------
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+# ---------------------------------------------------------------------------
+# Murf Falcon 2 Marathi voice
+# Falcon 2 is the current non-deprecated model as of Aug 16, 2026
+# Voice ID is set via env var — see .env.example for how to find it
+# ---------------------------------------------------------------------------
+MURF_VOICE_ID = os.getenv(
+    "MURF_VOICE_ID", "mr-IN-shilpa"
+)  # placeholder — set real ID in .env.local
+MURF_MODEL = "GEN2"  # Falcon 2 — do NOT use GEN1, deprecated Aug 16 2026
 
 
-class Assistant(Agent):
+class KrushiMitra(Agent):
+    """
+    Krushi Mitra voice agent.
+    Serves cotton farmers in Vidarbha (Yavatmal, Amravati, Akola, Wardha).
+    Primary language: Marathi. Fallback: Hindi.
+    """
+
     def __init__(self) -> None:
         super().__init__(instructions=SYSTEM_PROMPT)
+        self._latency = LatencyTracker()
 
-    # To add tools, use the @function_tool decorator.
-    # Here's an example that adds a simple weather tool.
-    # You also have to add `from livekit.agents import function_tool, RunContext` to the top of this file
-    # @function_tool
-    # async def lookup_weather(self, context: RunContext, location: str):
-    #     """Use this tool to look up current weather information in the given location.
-    #
-    #     If the location is not supported by the weather service, the tool will indicate this. You must tell the user the location's weather is unavailable.
-    #
-    #     Args:
-    #         location: The location to look up weather information for (e.g. city name)
-    #     """
-    #
-    #     logger.info(f"Looking up weather for {location}")
-    #
-    #     return "sunny with a temperature of 70 degrees."
+    async def on_user_speech_committed(self, message) -> None:
+        """Called when user finishes speaking — start latency clock."""
+        self._latency.on_speech_end()
+        app_logger.debug("[TURN] User speech committed: %s", message.content[:60])
+
+    async def on_agent_speech_started(self) -> None:
+        """Called when TTS first audio chunk is ready — record latency."""
+        self._latency.on_tts_first_audio()
+        self._latency.log_turn()
+
+    async def on_session_end(self) -> None:
+        """Log full session latency summary when conversation ends."""
+        summary = self._latency.summary()
+        app_logger.info("[SESSION END] Latency summary: %s", summary)
 
 
 server = AgentServer()
 
 
 def prewarm(proc: JobProcess):
+    """Pre-warm the VAD model before first call."""
     proc.userdata["vad"] = silero.VAD.load()
 
 
 server.setup_fnc = prewarm
 
 
-@server.rtc_session(agent_name="my-agent")
-async def my_agent(ctx: JobContext):
-    # Logging setup
-    # Add any other context you want in all log entries here
+@server.rtc_session(agent_name="krushi-mitra")
+async def krushi_mitra_session(ctx: JobContext):
+    """
+    Main voice pipeline session for Krushi Mitra.
+    STT: Deepgram Nova-3 (multilingual, handles Marathi + Hindi)
+    LLM: Groq (OpenAI-compatible, fast inference, non-deprecated model)
+    TTS: Murf Falcon 2 (Marathi voice, low-latency)
+    """
     ctx.log_context_fields = {
         "room": ctx.room.name,
+        "agent": AGENT_NAME,
     }
 
-    # Set up a voice AI pipeline using Murf Falcon, Gemini, Deepgram, and the LiveKit turn detector
+    app_logger.info("Krushi Mitra session starting for room: %s", ctx.room.name)
+
     session = AgentSession(
-        # Speech-to-text (STT) is your agent's ears, turning the user's speech into text that the LLM can understand
-        # See all available models at https://docs.livekit.io/agents/models/stt/
+        # STT: Deepgram Nova-3 — supports Marathi and Hindi in multilingual mode
         stt=deepgram.STT(model="nova-3", language="multi"),
-        # A Large Language Model (LLM) is your agent's brain, processing user input and generating a response
-        # See all available models at https://docs.livekit.io/agents/models/llm/
-        llm=google.LLM(
-                model="gemini-3.5-flash-lite",
-            ),
-        # Text-to-speech (TTS) is your agent's voice, turning the LLM's text into speech that the user can hear
-        # See all available models as well as voice selections at https://docs.livekit.io/agents/models/tts/
+        # LLM: Groq via OpenAI-compatible API
+        # Groq base_url points to api.groq.com, model = llama-3.3-70b-versatile
+        llm=lk_openai.LLM(
+            model=GROQ_MODEL,
+            base_url="https://api.groq.com/openai/v1",
+            api_key=os.getenv("GROQ_API_KEY"),
+        ),
+        # TTS: Murf Falcon 2 — Marathi voice
         tts=murf.TTS(
-                voice="Anisha", 
-                style="Conversation",
-                tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
-                text_pacing=True
-            ),
-        # VAD and turn detection are used to determine when the user is speaking and when the agent should respond
-        # See more at https://docs.livekit.io/agents/build/turns
+            voice=MURF_VOICE_ID,
+            style="Conversational",
+            model=MURF_MODEL,
+            tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
+            text_pacing=True,
+        ),
+        # Turn detection: Multilingual model handles Marathi/Hindi code-switching
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
-        # allow the LLM to generate a response while waiting for the end of turn
-        # See more at https://docs.livekit.io/agents/build/audio/#preemptive-generation
+        # Preemptive generation reduces perceived latency
         preemptive_generation=True,
     )
 
-    # To use a realtime model instead of a voice pipeline, use the following session setup instead.
-    # (Note: This is for the OpenAI Realtime API. For other providers, see https://docs.livekit.io/agents/models/realtime/))
-    # 1. Install livekit-agents[openai]
-    # 2. Set OPENAI_API_KEY in .env.local
-    # 3. Add `from livekit.plugins import openai` to the top of this file
-    # 4. Use the following session setup instead of the version above
-    # session = AgentSession(
-    #     llm=openai.realtime.RealtimeModel(voice="marin")
-    # )
-
-    # # Add a virtual avatar to the session, if desired
-    # # For other providers, see https://docs.livekit.io/agents/models/avatar/
-    # avatar = hedra.AvatarSession(
-    #   avatar_id="...",  # See https://docs.livekit.io/agents/models/avatar/plugins/hedra
-    # )
-    # # Start the avatar and wait for it to join
-    # await avatar.start(session, room=ctx.room)
-
-    # Start the session, which initializes the voice pipeline and warms up the models
     await session.start(
-        agent=Assistant(),
+        agent=KrushiMitra(),
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
                 noise_cancellation=lambda params: (
+                    # Telephony-optimized for SIP callers (future days)
                     noise_cancellation.BVCTelephony()
                     if params.participant.kind
                     == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
@@ -126,8 +143,8 @@ async def my_agent(ctx: JobContext):
         ),
     )
 
-    # Join the room and connect to the user
     await ctx.connect()
+    app_logger.info("Krushi Mitra connected. Ready for farmer queries.")
 
 
 if __name__ == "__main__":
