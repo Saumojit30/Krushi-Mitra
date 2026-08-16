@@ -1,0 +1,33 @@
+{
+  "last_updated": "2026-08-16T18:00:00Z",
+  "prices": {
+    "Yavatmal": {
+      "mandi_name": "Yavatmal APMC",
+      "min_price": 6800,
+      "max_price": 7350,
+      "modal_price": 7100,
+      "msp_reference": 6620
+    },
+    "Amravati": {
+      "mandi_name": "Amravati APMC",
+      "min_price": 6750,
+      "max_price": 7280,
+      "modal_price": 7050,
+      "msp_reference": 6620
+    },
+    "Akola": {
+      "mandi_name": "Akola APMC",
+      "min_price": 6900,
+      "max_price": 7400,
+      "modal_price": 7200,
+      "msp_reference": 6620
+    },
+    "Wardha": {
+      "mandi_name": "Wardha APMC",
+      "min_price": 6700,
+      "max_price": 7250,
+      "modal_price": 7000,
+      "msp_reference": 6620
+    }
+  }
+}
