@@ -232,6 +232,138 @@ class KrushiMitra(Agent):
             return f"Last call summary: {summary}"
         return "No previous call history found."
 
+    @function_tool
+    async def get_weather_forecast(self, district: str) -> str:
+        """Fetch the 3-day weather forecast (including precipitation probability and max/min temperatures) for a specific district in Vidarbha (Yavatmal, Amravati, Akola, Wardha).
+
+        Parameters:
+        - district: The district name (e.g., 'Yavatmal', 'Amravati', 'Akola', 'Wardha').
+
+        Use this when the farmer asks about rain, temperature, or weather forecasts.
+        """
+        import asyncio
+
+        import aiohttp
+
+        coords = {
+            "yavatmal": (20.389, 78.131),
+            "amravati": (20.932, 77.752),
+            "akola": (20.700, 77.008),
+            "wardha": (20.745, 78.602),
+        }
+
+        cleaned_district = district.strip().lower()
+        if cleaned_district not in coords:
+            app_logger.warning(
+                "Unrecognized district requested for weather: %s. Defaulting to Yavatmal.",
+                district,
+            )
+            lat, lon = coords["yavatmal"]
+            target_name = "Yavatmal (default)"
+        else:
+            lat, lon = coords[cleaned_district]
+            target_name = district.strip().capitalize()
+
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            f"&daily=precipitation_probability_max,temperature_2m_max,temperature_2m_min"
+            f"&timezone=Asia%2FKolkata&forecast_days=3"
+        )
+
+        try:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(url, timeout=aiohttp.ClientTimeout(total=5.0)) as response,
+            ):
+                if response.status != 200:
+                    return f"Error: Could not retrieve weather data. API responded with status {response.status}."
+
+                data = await response.json()
+                daily = data.get("daily", {})
+
+                if not daily or "time" not in daily:
+                    return "Error: Weather data formatting was unrecognized."
+
+                forecasts = []
+                for i in range(len(daily["time"])):
+                    date = daily["time"][i]
+                    rain_prob = daily["precipitation_probability_max"][i]
+                    temp_max = daily["temperature_2m_max"][i]
+                    temp_min = daily["temperature_2m_min"][i]
+                    forecasts.append(
+                        f"Date: {date}, Rain Probability: {rain_prob}%, "
+                        f"Temp: {temp_min} to {temp_max} degrees Celsius"
+                    )
+
+                forecast_str = "\n".join(forecasts)
+                return f"Live 3-day weather forecast for {target_name} (retrieved today):\n{forecast_str}"
+
+        except asyncio.TimeoutError:
+            app_logger.error("Weather API call timed out.")
+            return "Error: The live weather service timed out. Please tell the farmer that the weather system is temporarily busy, and recommend checking rain signs manually."
+        except Exception as e:
+            app_logger.error("Weather API failed with exception: %s", e)
+            return "Error: Failed to connect to the weather service due to a technical error."
+
+    @function_tool
+    async def get_cotton_mandi_prices(self, district: str) -> str:
+        """Fetch the cotton mandi (APMC) market prices for a specific district in Vidarbha (Yavatmal, Amravati, Akola, Wardha).
+
+        Parameters:
+        - district: The district name (e.g., 'Yavatmal', 'Amravati', 'Akola', 'Wardha').
+
+        Use this when the farmer asks about cotton rates, market prices, or mandi rates.
+        """
+        import json
+        import os
+
+        cleaned_district = district.strip().lower()
+        target_district = None
+        for key in ["Yavatmal", "Amravati", "Akola", "Wardha"]:
+            if key.lower() == cleaned_district:
+                target_district = key
+                break
+
+        if not target_district:
+            return (
+                "Error: Cotton price records are only available for Yavatmal, Amravati, Akola, and Wardha. "
+                "Please tell the farmer you only have prices for these locations."
+            )
+
+        try:
+            mandi_file = os.path.join(os.path.dirname(__file__), "mandi_prices.json")
+            if not os.path.exists(mandi_file):
+                return "Error: Mandi prices dataset is missing."
+
+            with open(mandi_file) as f:
+                data = json.load(f)
+
+            prices_dict = data.get("prices", {})
+            district_prices = prices_dict.get(target_district)
+
+            if not district_prices:
+                return f"Error: No price details found for {target_district}."
+
+            mandi_name = district_prices["mandi_name"]
+            min_price = district_prices["min_price"]
+            max_price = district_prices["max_price"]
+            modal_price = district_prices["modal_price"]
+            msp_ref = district_prices["msp_reference"]
+
+            return (
+                f"Cotton rates for {mandi_name} from yesterday's close (August 16, 2026):\n"
+                f"- Minimum price: {min_price} rupees per quintal\n"
+                f"- Maximum price: {max_price} rupees per quintal\n"
+                f"- Average modal price: {modal_price} rupees per quintal\n"
+                f"- Reference Government MSP: {msp_ref} rupees per quintal."
+            )
+        except Exception as e:
+            app_logger.error("Failed to load cotton mandi prices: %s", e)
+            return (
+                "Error: Could not retrieve market prices due to a local server error."
+            )
+
 
 server = AgentServer()
 
