@@ -46,7 +46,7 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   accent: '#2d6a4f',        // Deep green — agriculture
   logoDark: '/murf-logo-dark.svg',
   accentDark: '#52b788',   // Lighter green for dark mode
-  startButtonText: 'Bolnyas Suru Kara (Start Talking)',
+  startButtonText: 'कॉल सुरू करा (Start Call)',
 
   // Audio visualizer — wave style for natural voice feel
   audioVisualizerType: 'wave',
