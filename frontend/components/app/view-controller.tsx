@@ -101,31 +101,33 @@ export function ViewController({ appConfig }: ViewControllerProps) {
           <motion.div
             key="call-ended"
             {...VIEW_MOTION_PROPS}
-            className="flex flex-col items-center justify-center p-6 text-center"
+            className="flex flex-col items-center justify-center p-6 text-center mx-auto w-full max-w-md"
           >
-            <div className="flex size-16 items-center justify-center rounded-full bg-zinc-500/10 text-zinc-600 dark:text-zinc-400">
-              <PhoneOff className="size-8" />
-            </div>
+            <section className="flex flex-col items-center justify-center text-center rounded-3xl bg-zinc-950/60 backdrop-blur-2xl border border-zinc-800/50 p-10 shadow-2xl shadow-black/50 w-full">
+              <div className="flex size-16 items-center justify-center rounded-full bg-white/10 text-white">
+                <PhoneOff className="size-8" />
+              </div>
 
-            <div className="mt-4">
-              <AgentStatusBadge state="ended" />
-            </div>
+              <div className="mt-4 mb-2">
+                <AgentStatusBadge state="ended" />
+              </div>
 
-            <h2 className="mt-4 text-xl font-bold text-foreground">
-              कॉल यशस्वीरीत्या संपला
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Krushi Mitra voice session ended. You can start a new call anytime.
-            </p>
+              <h2 className="mt-2 text-xl font-medium text-white tracking-wide">
+                कॉल संपला
+              </h2>
+              <p className="mt-1 text-sm text-zinc-300 font-light">
+                Krushi Mitra session ended.
+              </p>
 
-            <Button
-              size="lg"
-              onClick={handleStartCall}
-              className="mt-6 rounded-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-sm gap-2"
-            >
-              <PhoneCall className="size-4" />
-              नवा कॉल सुरू करा (Start New Call)
-            </Button>
+              <Button
+                size="lg"
+                onClick={handleStartCall}
+                className="mt-8 rounded-full bg-emerald-700 hover:bg-emerald-600 text-white font-medium text-sm gap-2 transition-transform hover:scale-105 active:scale-95"
+              >
+                <PhoneCall className="size-4" />
+                नवा कॉल सुरू करा
+              </Button>
+            </section>
           </motion.div>
         )}
 

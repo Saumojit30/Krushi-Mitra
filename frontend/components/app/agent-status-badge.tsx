@@ -30,60 +30,46 @@ const STATE_CONFIG: Record<
   AgentStateDisplay,
   {
     labelMr: string;
-    labelEn: string;
-    badgeBg: string;
-    textColor: string;
-    borderColor: string;
-    pulseColor: string;
+    bgClass: string;
+    textClass: string;
+    pulseClass: string;
   }
 > = {
   ready: {
-    labelMr: 'कॉलसाठी तयार',
-    labelEn: 'Ready to assist',
-    badgeBg: 'bg-emerald-500/10 dark:bg-emerald-500/20',
-    textColor: 'text-emerald-700 dark:text-emerald-300',
-    borderColor: 'border-emerald-500/30',
-    pulseColor: 'bg-emerald-500',
+    labelMr: 'कॉलसाठी तयार (Ready)',
+    bgClass: 'bg-emerald-950/80 border-emerald-500/40',
+    textClass: 'text-emerald-300',
+    pulseClass: 'bg-emerald-400',
   },
   connecting: {
     labelMr: 'कॉल जोडत आहे...',
-    labelEn: 'Connecting to Krushi Mitra...',
-    badgeBg: 'bg-amber-500/10 dark:bg-amber-500/20',
-    textColor: 'text-amber-700 dark:text-amber-300',
-    borderColor: 'border-amber-500/30',
-    pulseColor: 'bg-amber-500',
+    bgClass: 'bg-amber-950/80 border-amber-500/40',
+    textClass: 'text-amber-300',
+    pulseClass: 'bg-amber-400',
   },
   listening: {
-    labelMr: 'ऐकत आहे... (तुम्ही बोला)',
-    labelEn: 'Listening to you',
-    badgeBg: 'bg-emerald-500/15 dark:bg-emerald-500/25',
-    textColor: 'text-emerald-800 dark:text-emerald-200',
-    borderColor: 'border-emerald-500/40',
-    pulseColor: 'bg-emerald-500',
+    labelMr: 'ऐकत आहे... (Speak Now)',
+    bgClass: 'bg-emerald-950/90 border-emerald-400/50 shadow-[0_0_15px_rgba(16,185,129,0.2)]',
+    textClass: 'text-emerald-200 font-semibold',
+    pulseClass: 'bg-emerald-400',
   },
   thinking: {
     labelMr: 'विचार करत आहे...',
-    labelEn: 'Krushi Mitra is thinking...',
-    badgeBg: 'bg-blue-500/10 dark:bg-blue-500/20',
-    textColor: 'text-blue-700 dark:text-blue-300',
-    borderColor: 'border-blue-500/30',
-    pulseColor: 'bg-blue-500',
+    bgClass: 'bg-amber-950/90 border-amber-400/50',
+    textClass: 'text-amber-200',
+    pulseClass: 'bg-amber-400',
   },
   speaking: {
     labelMr: 'कृषि मित्र बोलत आहेत...',
-    labelEn: 'Krushi Mitra is speaking',
-    badgeBg: 'bg-purple-500/15 dark:bg-purple-500/25',
-    textColor: 'text-purple-800 dark:text-purple-200',
-    borderColor: 'border-purple-500/40',
-    pulseColor: 'bg-purple-500',
+    bgClass: 'bg-amber-900/80 border-amber-400/50 shadow-[0_0_15px_rgba(245,158,11,0.25)]',
+    textClass: 'text-amber-100 font-semibold',
+    pulseClass: 'bg-amber-300',
   },
   ended: {
-    labelMr: 'कॉल संपला',
-    labelEn: 'Call ended',
-    badgeBg: 'bg-zinc-500/10 dark:bg-zinc-500/20',
-    textColor: 'text-zinc-700 dark:text-zinc-300',
-    borderColor: 'border-zinc-500/30',
-    pulseColor: 'bg-zinc-400',
+    labelMr: 'कॉल संपला (Ended)',
+    bgClass: 'bg-zinc-900/80 border-zinc-700/50',
+    textClass: 'text-zinc-400',
+    pulseClass: 'bg-zinc-500',
   },
 };
 
@@ -98,71 +84,49 @@ export function AgentStatusBadge({
     <AnimatePresence mode="wait">
       <motion.div
         key={state}
-        initial={{ opacity: 0, y: -6, scale: 0.95 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 6, scale: 0.95 }}
-        transition={{ duration: 0.25, ease: 'easeOut' }}
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.2 }}
         className={cn(
-          'inline-flex items-center gap-2.5 rounded-full border px-4 py-1.5 text-xs font-semibold backdrop-blur-md shadow-xs',
-          config.badgeBg,
-          config.textColor,
-          config.borderColor,
+          'inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-medium backdrop-blur-md shadow-md transition-colors',
+          config.bgClass,
+          config.textClass,
           className
         )}
       >
-        {/* Animated Icon Container */}
+        {/* Status Icon */}
         <span className="relative flex size-3.5 items-center justify-center">
           {state === 'listening' && (
             <>
-              <span
-                className={cn(
-                  'absolute inline-flex size-full animate-ping rounded-full opacity-75',
-                  config.pulseColor
-                )}
-              />
+              <span className={cn('absolute inline-flex size-full animate-ping rounded-full opacity-75', config.pulseClass)} />
               <Mic className="size-3.5" />
             </>
           )}
 
           {state === 'speaking' && (
             <>
-              <span
-                className={cn(
-                  'absolute inline-flex size-full animate-ping rounded-full opacity-75',
-                  config.pulseColor
-                )}
-              />
+              <span className={cn('absolute inline-flex size-full animate-ping rounded-full opacity-75', config.pulseClass)} />
               <Volume2 className="size-3.5" />
             </>
           )}
 
-          {state === 'connecting' && (
-            <RefreshCw className="size-3.5 animate-spin" />
-          )}
-
+          {state === 'connecting' && <RefreshCw className="size-3.5 animate-spin" />}
           {state === 'thinking' && <Sparkles className="size-3.5 animate-pulse" />}
-
-          {state === 'ready' && (
-            <CheckCircle2 className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-          )}
-
+          {state === 'ready' && <CheckCircle2 className="size-3.5 text-emerald-400" />}
           {state === 'ended' && <PhoneOff className="size-3.5" />}
         </span>
 
-        {/* Status Label (Bilingual) */}
-        <div className="flex items-center gap-1.5">
-          <span className="font-medium tracking-wide">{config.labelMr}</span>
-          <span className="opacity-40">|</span>
-          <span className="text-[11px] font-normal opacity-80">{config.labelEn}</span>
-        </div>
+        {/* Marathi Label */}
+        <span className="tracking-wide">{config.labelMr}</span>
 
         {/* Restart Button if Call Ended */}
         {state === 'ended' && onRestartCall && (
           <button
             onClick={onRestartCall}
-            className="ml-1.5 rounded-full bg-emerald-700 px-2.5 py-0.5 text-[10px] text-white transition-colors hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+            className="ml-2 flex items-center gap-1 rounded-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2.5 py-0.5 text-[11px] transition-colors"
           >
-            पुन्हा कॉल करा (Restart)
+            पुन्हा कॉल करा
           </button>
         )}
       </motion.div>

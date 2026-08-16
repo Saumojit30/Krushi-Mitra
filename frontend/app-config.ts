@@ -48,10 +48,10 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   accentDark: '#52b788',   // Lighter green for dark mode
   startButtonText: 'कॉल सुरू करा (Start Call)',
 
-  // Audio visualizer — wave style for natural voice feel
-  audioVisualizerType: 'wave',
-  audioVisualizerColor: '#2d6a4f',
-  audioVisualizerColorDark: '#52b788',
+  // Audio visualizer — aura style with golden glow for Option 1 theme
+  audioVisualizerType: 'aura',
+  audioVisualizerColor: '#d4af37',
+  audioVisualizerColorDark: '#d4af37',
 
   // optional: audio visualization configuration
   // audioVisualizerType: 'bar',
