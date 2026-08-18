@@ -35,7 +35,8 @@ export interface AppConfig {
 export const APP_CONFIG_DEFAULTS: AppConfig = {
   companyName: 'Krushi Mitra',
   pageTitle: 'Krushi Mitra — Shetkaryasathi Voice Advisor',
-  pageDescription: 'Vidarbhyatil Kapas Shetkaryansathi Vishwasarha Sahayak | Trusted voice advisor for cotton farmers of Vidarbha, Maharashtra',
+  pageDescription:
+    'Vidarbhyatil Kapas Shetkaryansathi Vishwasarha Sahayak | Trusted voice advisor for cotton farmers of Vidarbha, Maharashtra',
 
   supportsChatInput: true,
   supportsVideoInput: true,
@@ -43,9 +44,9 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   isPreConnectBufferEnabled: true,
 
   logo: '/murf-logo.svg',
-  accent: '#2d6a4f',        // Deep green — agriculture
+  accent: '#2d6a4f', // Deep green — agriculture
   logoDark: '/murf-logo-dark.svg',
-  accentDark: '#52b788',   // Lighter green for dark mode
+  accentDark: '#52b788', // Lighter green for dark mode
   startButtonText: 'कॉल सुरू करा (Start Call)',
 
   // Audio visualizer — aura style with golden glow for Option 1 theme

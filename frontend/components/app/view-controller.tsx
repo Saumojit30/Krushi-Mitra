@@ -1,16 +1,16 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useTheme } from 'next-themes';
+import { PhoneCall, PhoneOff } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useAgent, useSessionContext } from '@livekit/components-react';
 import type { AppConfig } from '@/app-config';
 import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session-view-01';
-import { WelcomeView } from '@/components/app/welcome-view';
-import { AgentStatusBadge, type AgentStateDisplay } from '@/components/app/agent-status-badge';
+import { type AgentStateDisplay, AgentStatusBadge } from '@/components/app/agent-status-badge';
 import { MicPermissionModal } from '@/components/app/mic-permission-modal';
+import { WelcomeView } from '@/components/app/welcome-view';
 import { Button } from '@/components/ui/button';
-import { PhoneCall, PhoneOff } from 'lucide-react';
 
 const MotionWelcomeView = motion.create(WelcomeView);
 const MotionSessionView = motion.create(AgentSessionView_01);
@@ -101,9 +101,9 @@ export function ViewController({ appConfig }: ViewControllerProps) {
           <motion.div
             key="call-ended"
             {...VIEW_MOTION_PROPS}
-            className="flex flex-col items-center justify-center p-6 text-center mx-auto w-full max-w-md"
+            className="mx-auto flex w-full max-w-md flex-col items-center justify-center p-6 text-center"
           >
-            <section className="flex flex-col items-center justify-center text-center rounded-3xl bg-zinc-950/60 backdrop-blur-2xl border border-zinc-800/50 p-10 shadow-2xl shadow-black/50 w-full">
+            <section className="flex w-full flex-col items-center justify-center rounded-3xl border border-zinc-800/50 bg-zinc-950/60 p-10 text-center shadow-2xl shadow-black/50 backdrop-blur-2xl">
               <div className="flex size-16 items-center justify-center rounded-full bg-white/10 text-white">
                 <PhoneOff className="size-8" />
               </div>
@@ -112,17 +112,13 @@ export function ViewController({ appConfig }: ViewControllerProps) {
                 <AgentStatusBadge state="ended" />
               </div>
 
-              <h2 className="mt-2 text-xl font-medium text-white tracking-wide">
-                कॉल संपला
-              </h2>
-              <p className="mt-1 text-sm text-zinc-300 font-light">
-                Krushi Mitra session ended.
-              </p>
+              <h2 className="mt-2 text-xl font-medium tracking-wide text-white">कॉल संपला</h2>
+              <p className="mt-1 text-sm font-light text-zinc-300">Krushi Mitra session ended.</p>
 
               <Button
                 size="lg"
                 onClick={handleStartCall}
-                className="mt-8 rounded-full bg-emerald-700 hover:bg-emerald-600 text-white font-medium text-sm gap-2 transition-transform hover:scale-105 active:scale-95"
+                className="mt-8 gap-2 rounded-full bg-emerald-700 text-sm font-medium text-white transition-transform hover:scale-105 hover:bg-emerald-600 active:scale-95"
               >
                 <PhoneCall className="size-4" />
                 नवा कॉल सुरू करा
@@ -147,12 +143,9 @@ export function ViewController({ appConfig }: ViewControllerProps) {
         {isConnected && (
           <div key="active-session" className="fixed inset-0 z-40">
             {/* Top Status Bar showing 5 Agent States clearly */}
-            <div className="absolute top-4 inset-x-0 z-50 flex justify-center pointer-events-none">
+            <div className="pointer-events-none absolute inset-x-0 top-4 z-50 flex justify-center">
               <div className="pointer-events-auto">
-                <AgentStatusBadge
-                  state={currentDisplayState}
-                  onRestartCall={handleEndCall}
-                />
+                <AgentStatusBadge state={currentDisplayState} onRestartCall={handleEndCall} />
               </div>
             </div>
 

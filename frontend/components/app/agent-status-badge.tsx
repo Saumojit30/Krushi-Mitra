@@ -1,24 +1,12 @@
 'use client';
 
 import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import {
-  Mic,
-  Volume2,
-  PhoneOff,
-  CheckCircle2,
-  RefreshCw,
-  Sparkles,
-} from 'lucide-react';
+import { CheckCircle2, Mic, PhoneOff, RefreshCw, Sparkles, Volume2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '@/lib/shadcn/utils';
 
 export type AgentStateDisplay =
-  | 'ready'
-  | 'connecting'
-  | 'listening'
-  | 'thinking'
-  | 'speaking'
-  | 'ended';
+  'ready' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'ended';
 
 interface AgentStatusBadgeProps {
   state: AgentStateDisplay;
@@ -73,11 +61,7 @@ const STATE_CONFIG: Record<
   },
 };
 
-export function AgentStatusBadge({
-  state,
-  className,
-  onRestartCall,
-}: AgentStatusBadgeProps) {
+export function AgentStatusBadge({ state, className, onRestartCall }: AgentStatusBadgeProps) {
   const config = STATE_CONFIG[state] || STATE_CONFIG.ready;
 
   return (
@@ -89,7 +73,7 @@ export function AgentStatusBadge({
         exit={{ opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.2 }}
         className={cn(
-          'inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-medium backdrop-blur-md shadow-md transition-colors',
+          'inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-medium shadow-md backdrop-blur-md transition-colors',
           config.bgClass,
           config.textClass,
           className
@@ -99,14 +83,24 @@ export function AgentStatusBadge({
         <span className="relative flex size-3.5 items-center justify-center">
           {state === 'listening' && (
             <>
-              <span className={cn('absolute inline-flex size-full animate-ping rounded-full opacity-75', config.pulseClass)} />
+              <span
+                className={cn(
+                  'absolute inline-flex size-full animate-ping rounded-full opacity-75',
+                  config.pulseClass
+                )}
+              />
               <Mic className="size-3.5" />
             </>
           )}
 
           {state === 'speaking' && (
             <>
-              <span className={cn('absolute inline-flex size-full animate-ping rounded-full opacity-75', config.pulseClass)} />
+              <span
+                className={cn(
+                  'absolute inline-flex size-full animate-ping rounded-full opacity-75',
+                  config.pulseClass
+                )}
+              />
               <Volume2 className="size-3.5" />
             </>
           )}
@@ -124,7 +118,7 @@ export function AgentStatusBadge({
         {state === 'ended' && onRestartCall && (
           <button
             onClick={onRestartCall}
-            className="ml-2 flex items-center gap-1 rounded-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2.5 py-0.5 text-[11px] transition-colors"
+            className="ml-2 flex items-center gap-1 rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/30"
           >
             पुन्हा कॉल करा
           </button>
