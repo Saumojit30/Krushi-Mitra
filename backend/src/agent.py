@@ -364,6 +364,42 @@ class KrushiMitra(Agent):
                 "Error: Could not retrieve market prices due to a local server error."
             )
 
+    @function_tool
+    async def create_escalation(self, reason: str, summary: str, urgency: str) -> str:
+        """Create an escalation ticket to a human agricultural specialist (KVK Officer).
+
+        Parameters:
+        - reason: The primary reason for escalation (e.g., 'Severe Pink Bollworm infestation', 'Pesticide brand recommendation request', 'Mandi price dispute').
+        - summary: A concise summary of the issue (Who, what happened, what was checked). DO NOT include private passwords, PINs, or OTPs.
+        - urgency: The level of urgency ('HIGH' or 'MEDIUM').
+
+        Use this only when the farmer has explicitly agreed to escalate.
+        """
+        try:
+            from database import create_escalation
+
+            ticket_id = create_escalation(
+                user_id=self.user_id,
+                reason=reason,
+                summary=summary,
+                urgency=urgency,
+            )
+            app_logger.info(
+                "Created escalation ticket #%s for user %s: %s (Urgency: %s)",
+                ticket_id,
+                self.user_id,
+                reason,
+                urgency,
+            )
+            return (
+                f"Successfully created escalation ticket #{ticket_id}. "
+                f"Please tell the farmer that their ticket number is {ticket_id} and "
+                f"a KVK specialist will call them back on this number soon."
+            )
+        except Exception as e:
+            app_logger.error("Failed to create escalation ticket: %s", e)
+            return "Error: Could not create escalation ticket due to an internal server error."
+
 
 server = AgentServer()
 
