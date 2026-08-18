@@ -6,7 +6,7 @@ Run with: uv run pytest tests/test_logger.py -v
 """
 
 import time
-import pytest
+
 from logger import LatencyTracker, TurnLatency
 
 
