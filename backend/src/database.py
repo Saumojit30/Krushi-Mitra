@@ -46,6 +46,21 @@ def init_db():
             FOREIGN KEY(user_id) REFERENCES farmers(user_id)
         )
     """)
+
+    # Run automatic SQLite schema migrations for call analytics columns
+    cursor.execute("PRAGMA table_info(calls)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if "duration_seconds" not in columns:
+        cursor.execute(
+            "ALTER TABLE calls ADD COLUMN duration_seconds INTEGER DEFAULT 0"
+        )
+    if "outcome" not in columns:
+        cursor.execute("ALTER TABLE calls ADD COLUMN outcome TEXT DEFAULT 'SUCCESS'")
+    if "error_log" not in columns:
+        cursor.execute("ALTER TABLE calls ADD COLUMN error_log TEXT")
+    if "call_type" not in columns:
+        cursor.execute("ALTER TABLE calls ADD COLUMN call_type TEXT DEFAULT 'INBOUND'")
+
     conn.commit()
     conn.close()
 
@@ -114,16 +129,31 @@ def save_farmer(
     conn.close()
 
 
-def save_call_summary(user_id: str, summary: str):
+def save_call_summary(
+    user_id: str,
+    summary: str,
+    duration_seconds: int = 0,
+    outcome: str = "SUCCESS",
+    error_log: Optional[str] = None,
+    call_type: str = "INBOUND",
+):
     conn = get_db()
     cursor = conn.cursor()
     now = datetime.now(timezone.utc).isoformat()
     cursor.execute(
         """
-        INSERT INTO calls (user_id, summary, created_at)
-        VALUES (?, ?, ?)
+        INSERT INTO calls (user_id, summary, duration_seconds, outcome, error_log, call_type, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     """,
-        (user_id, summary, now),
+        (
+            user_id,
+            summary,
+            duration_seconds,
+            outcome.upper(),
+            error_log,
+            call_type.upper(),
+            now,
+        ),
     )
     conn.commit()
     conn.close()

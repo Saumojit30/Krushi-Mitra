@@ -71,6 +71,9 @@ class OutboundAgent(Agent):
         self.last_summary = last_summary
         self._lk_session = None
         self._lk_ctx = ctx
+        self.start_time = None
+        self.tool_executed = False
+        self.error_log = None
 
         # Build contextual instructions
         instructions = SYSTEM_PROMPT
@@ -179,6 +182,27 @@ class OutboundAgent(Agent):
 
     async def on_session_end(self) -> None:
         """Save call summary to SQLite when outbound call ends."""
+        import time
+
+        duration = 0
+        if self.start_time:
+            duration = int(time.time() - self.start_time)
+
+        outcome = "FAILURE"
+        error_msg = None
+
+        if self.error_log:
+            outcome = "FAILURE"
+            error_msg = self.error_log
+        elif self.tool_executed and duration >= 10:
+            outcome = "SUCCESS"
+        else:
+            outcome = "FAILURE"
+            if duration < 10:
+                error_msg = "Call ended too early (short duration)"
+            else:
+                error_msg = "No advisory action / tool executed during the call"
+
         if self._lk_session and self._lk_ctx:
             messages = list(self._lk_session.history.messages)
             has_dialogue = any(m.role in ("user", "assistant") for m in messages)
@@ -213,16 +237,39 @@ class OutboundAgent(Agent):
                     if summary_text:
                         from database import save_call_summary
 
-                        save_call_summary(self.user_id, summary_text)
-                        logger.info(
-                            "Saved outbound call summary for %s: %s",
+                        save_call_summary(
                             self.user_id,
                             summary_text,
+                            duration_seconds=duration,
+                            outcome=outcome,
+                            error_log=error_msg,
+                            call_type="OUTBOUND",
+                        )
+                        logger.info(
+                            "Saved outbound call summary for %s: %s (Duration: %ss, Outcome: %s)",
+                            self.user_id,
+                            summary_text,
+                            duration,
+                            outcome,
                         )
                 except Exception as e:
                     logger.error(
                         "Failed to generate or save outbound call summary: %s", e
                     )
+            else:
+                try:
+                    from database import save_call_summary
+
+                    save_call_summary(
+                        self.user_id,
+                        "Call connected but no dialogue took place.",
+                        duration_seconds=duration,
+                        outcome="FAILURE",
+                        error_log="No dialogue detected",
+                        call_type="OUTBOUND",
+                    )
+                except Exception as e:
+                    logger.error("Failed to save failed outbound call log: %s", e)
 
     @function_tool
     async def get_farmer_profile(self) -> str:
@@ -279,6 +326,7 @@ class OutboundAgent(Agent):
             facts["irrigation_type"] = irrigation_type
 
         save_farmer(user_id=self.user_id, name=name, facts=facts)
+        self.tool_executed = True
         return "Profile successfully saved/updated."
 
     @function_tool
@@ -352,13 +400,16 @@ class OutboundAgent(Agent):
                     )
 
                 forecast_str = "\n".join(forecasts)
+                self.tool_executed = True
                 return f"Live 3-day weather forecast for {target_name} (retrieved today):\n{forecast_str}"
 
         except asyncio.TimeoutError:
             logger.error("Weather API call timed out.")
+            self.error_log = "Weather API call timed out"
             return "Error: The live weather service timed out. Please tell the farmer that the weather system is temporarily busy, and recommend checking rain signs manually."
         except Exception as e:
             logger.error("Weather API failed with exception: %s", e)
+            self.error_log = f"Weather API failed with exception: {e}"
             return "Error: Failed to connect to the weather service due to a technical error."
 
     @function_tool
@@ -405,6 +456,7 @@ class OutboundAgent(Agent):
             modal_price = district_prices["modal_price"]
             msp_ref = district_prices["msp_reference"]
 
+            self.tool_executed = True
             return (
                 f"Cotton rates for {mandi_name} from yesterday's close (August 16, 2026):\n"
                 f"- Minimum price: {min_price} rupees per quintal\n"
@@ -414,6 +466,7 @@ class OutboundAgent(Agent):
             )
         except Exception as e:
             logger.error("Failed to load cotton mandi prices: %s", e)
+            self.error_log = f"Failed to load cotton mandi prices: {e}"
             return (
                 "Error: Could not retrieve market prices due to a local server error."
             )
@@ -445,6 +498,7 @@ class OutboundAgent(Agent):
                 reason,
                 urgency,
             )
+            self.tool_executed = True
             return (
                 f"Successfully created escalation ticket #{ticket_id}. "
                 f"Please tell the farmer that their ticket number is {ticket_id} and "
@@ -452,6 +506,7 @@ class OutboundAgent(Agent):
             )
         except Exception as e:
             logger.error("Failed to create escalation ticket: %s", e)
+            self.error_log = f"Failed to create escalation ticket: {e}"
             return "Error: Could not create escalation ticket due to an internal server error."
 
 
@@ -534,6 +589,9 @@ async def outbound_agent(ctx: JobContext):
     agent_instance._lk_ctx = ctx
 
     # 4. Start the session while the phone is ringing
+    import time
+
+    agent_instance.start_time = time.time()
     session_started = asyncio.create_task(
         session.start(
             agent=agent_instance,
