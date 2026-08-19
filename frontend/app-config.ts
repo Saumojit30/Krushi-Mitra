@@ -43,9 +43,9 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   supportsScreenShare: true,
   isPreConnectBufferEnabled: true,
 
-  logo: '/murf-logo.svg',
+  logo: '/cotton-logo-icon.png',
   accent: '#2d6a4f', // Deep green — agriculture
-  logoDark: '/murf-logo-dark.svg',
+  logoDark: '/cotton-logo-icon.png',
   accentDark: '#52b788', // Lighter green for dark mode
   startButtonText: 'कॉल सुरू करा (Start Call)',
 
