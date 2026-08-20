@@ -30,6 +30,8 @@ from livekit.agents import (
 from livekit.plugins import deepgram, google, murf, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+from prompts import MARKET_SPECIALIST_PROMPT, PEST_SPECIALIST_PROMPT
+
 logger = logging.getLogger("inbound-agent")
 
 load_dotenv(".env.local")
@@ -46,11 +48,22 @@ GREETING = "Thanks for calling! How can I help you today?"
 
 
 class InboundAgent(Agent):
-    def __init__(self, ctx: JobContext, caller_identity: str | None) -> None:
-        super().__init__(instructions=SYSTEM_PROMPT)
+    def __init__(
+        self,
+        ctx: JobContext,
+        caller_identity: str | None,
+        start_time: float | None = None,
+    ) -> None:
         self.ctx = ctx
-        # The LiveKit participant identity of the caller — needed to transfer them.
         self.caller_identity = caller_identity
+        self.user_id = caller_identity or "anonymous-phone"
+        self.profile = {}
+        self.start_time = start_time
+        self._lk_session = None
+        self._lk_ctx = ctx
+        self.tool_executed = False
+        self.error_log = None
+        super().__init__(instructions=SYSTEM_PROMPT)
 
     @function_tool
     async def transfer_to_human(self, context: RunContext) -> str:
@@ -99,6 +112,258 @@ class InboundAgent(Agent):
             api.DeleteRoomRequest(room=self.ctx.room.name)
         )
         return "Call ended."
+
+    @function_tool
+    async def handoff_to_pest_specialist(self) -> str:
+        """Call this tool immediately when the farmer asks questions about crop pests,
+        insect infestation, pink bollworm, crop diseases, plant damage, or pesticide spraying.
+        This hands the call over to the specialized Cotton Pest & Disease Specialist.
+        """
+        logger.info("Triage handing over to Cotton Pest Specialist...")
+        pest = CottonPestSpecialist(
+            ctx=self.ctx,
+            caller_identity=self.caller_identity,
+            start_time=self.start_time,
+        )
+        pest._lk_session = self._lk_session
+        pest._lk_ctx = self._lk_ctx
+        pest.tool_executed = True
+
+        # Copy context messages
+        ctx = pest.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await pest.update_chat_ctx(ctx)
+
+        if self._lk_session:
+            self._lk_session.update_agent(pest)
+            await self._lk_session.say(
+                "मी आपल्याला आमच्या कापूस कीड आणि रोग नियंत्रण तज्ज्ञांकडे हस्तांतरित करत आहे. कृपया एक सेकंद थांबा.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully to the Cotton Pest & Disease Specialist."
+
+    @function_tool
+    async def handoff_to_market_specialist(self) -> str:
+        """Call this tool immediately when the farmer asks questions about Cotton Corporation of India (CCI)
+        buying centers, government MSP purchase process, moisture grading, or necessary land/bank papers.
+        This hands the call over to the specialized Cotton Market & CCI Procurement Specialist.
+        """
+        logger.info("Triage handing over to Cotton Market Specialist...")
+        market = CottonMarketSpecialist(
+            ctx=self.ctx,
+            caller_identity=self.caller_identity,
+            start_time=self.start_time,
+        )
+        market._lk_session = self._lk_session
+        market._lk_ctx = self._lk_ctx
+        market.tool_executed = True
+
+        # Copy context messages
+        ctx = market.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await market.update_chat_ctx(ctx)
+
+        if self._lk_session:
+            self._lk_session.update_agent(market)
+            await self._lk_session.say(
+                "मी आपल्याला आमच्या कापूस बाजार आणि हमीभाव तज्ज्ञांकडे हस्तांतरित करत आहे. कृपया एक सेकंद थांबा.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully to the Cotton Market & CCI procurement specialist."
+
+
+class CottonPestSpecialist(Agent):
+    """Cotton Pest & Disease Specialist Agent.
+    Focuses strictly on insect/pest infestation and crop remedies.
+    """
+
+    def __init__(
+        self,
+        ctx: JobContext,
+        caller_identity: str | None = None,
+        start_time: float | None = None,
+    ) -> None:
+        self.ctx = ctx
+        self.caller_identity = caller_identity
+        self.user_id = caller_identity or "anonymous-phone"
+        self.profile = {}
+        self.start_time = start_time
+        self.tool_executed = True
+        self.error_log = None
+        self._lk_session = None
+        self._lk_ctx = ctx
+        super().__init__(instructions=PEST_SPECIALIST_PROMPT)
+
+    async def on_enter(self) -> None:
+        logger.info("CottonPestSpecialist agent entered the session.")
+        greeting = (
+            "Namaskar, mee Krushi Mitra cha Cotton Pest Specialist ahe. "
+            "Aapan कापसावरील कीड आणि रोग नियंत्रणाविषयी बोलत आहात. "
+            "मी मागील संभाषण पाहिले आहे. सांगा दादा, काय समस्या आहे?"
+        )
+        if self.session:
+            await self.session.say(greeting, allow_interruptions=True)
+
+    @function_tool
+    async def handoff_to_triage(self) -> str:
+        """Call this tool if the farmer stops talking about pests/diseases and asks
+        general questions about weather, registration, profile setup, or general greeting.
+        This hands the call back to the main triage agent.
+        """
+        logger.info("Specialist handing back to Triage Agent...")
+        triage = InboundAgent(
+            ctx=self.ctx,
+            caller_identity=self.caller_identity,
+            start_time=self.start_time,
+        )
+        triage._lk_session = self.session
+        triage._lk_ctx = self._lk_ctx
+        triage.tool_executed = True
+
+        # Copy context messages
+        ctx = triage.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await triage.update_chat_ctx(ctx)
+
+        if self.session:
+            self.session.update_agent(triage)
+            await self.session.say(
+                "मी आपल्याला आमच्या मुख्य सहाय्यकाकडे परत हस्तांतरित करत आहे.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully back to the main Triage Agent."
+
+    @function_tool
+    async def handoff_to_market_specialist(self) -> str:
+        """Call this tool if the farmer asks about MSP buying rates, CCI center location,
+        Aadhaar/7/12 extract registration documents, or government procurement grading details.
+        This hands the call over to the Cotton Market & CCI procurement specialist.
+        """
+        logger.info("Specialist handing over to Cotton Market Specialist...")
+        market = CottonMarketSpecialist(
+            ctx=self.ctx,
+            caller_identity=self.caller_identity,
+            start_time=self.start_time,
+        )
+        market._lk_session = self.session
+        market._lk_ctx = self._lk_ctx
+        market.tool_executed = True
+
+        # Copy context messages
+        ctx = market.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await market.update_chat_ctx(ctx)
+
+        if self.session:
+            self.session.update_agent(market)
+            await self.session.say(
+                "मी आपल्याला आमच्या कापूस बाजार आणि हमीभाव तज्ज्ञांकडे हस्तांतरित करत आहे.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully to the Cotton Market & CCI procurement specialist."
+
+
+class CottonMarketSpecialist(Agent):
+    """Cotton Market & CCI Procurement Specialist Agent.
+    Focuses strictly on MSP purchasing centers, APMC mandi rates, and required documentation.
+    """
+
+    def __init__(
+        self,
+        ctx: JobContext,
+        caller_identity: str | None = None,
+        start_time: float | None = None,
+    ) -> None:
+        self.ctx = ctx
+        self.caller_identity = caller_identity
+        self.user_id = caller_identity or "anonymous-phone"
+        self.profile = {}
+        self.start_time = start_time
+        self.tool_executed = True
+        self.error_log = None
+        self._lk_session = None
+        self._lk_ctx = ctx
+        super().__init__(instructions=MARKET_SPECIALIST_PROMPT)
+
+    async def on_enter(self) -> None:
+        logger.info("CottonMarketSpecialist agent entered the session.")
+        greeting = (
+            "Namaskar, mee Krushi Mitra cha Cotton Market Specialist ahe. "
+            "Aapan कापूस हमीभाव आणि सीसीआय खरेदीबद्दल बोलत आहात. "
+            "मी मागील संभाषण पाहिले आहे. सांगा, खरेदी केंद्राबद्दल काय माहिती हवी आहे?"
+        )
+        if self.session:
+            await self.session.say(greeting, allow_interruptions=True)
+
+    @function_tool
+    async def handoff_to_triage(self) -> str:
+        """Call this tool if the farmer stops talking about market rates/procurement and asks
+        general questions about weather, registration, profile setup, or general greeting.
+        This hands the call back to the main triage agent.
+        """
+        logger.info("Specialist handing back to Triage Agent...")
+        triage = InboundAgent(
+            ctx=self.ctx,
+            caller_identity=self.caller_identity,
+            start_time=self.start_time,
+        )
+        triage._lk_session = self.session
+        triage._lk_ctx = self._lk_ctx
+        triage.tool_executed = True
+
+        # Copy context messages
+        ctx = triage.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await triage.update_chat_ctx(ctx)
+
+        if self.session:
+            self.session.update_agent(triage)
+            await self.session.say(
+                "मी आपल्याला आमच्या मुख्य सहाय्यकाकडे परत हस्तांतरित करत आहे.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully back to the main Triage Agent."
+
+    @function_tool
+    async def handoff_to_pest_specialist(self) -> str:
+        """Call this tool if the farmer asks about crop pests, insect infestation,
+        pink bollworm, diseases, leaf curling, or pesticide spraying.
+        This hands the call over to the Cotton Pest & Disease Specialist.
+        """
+        logger.info("Specialist handing over to Cotton Pest Specialist...")
+        pest = CottonPestSpecialist(
+            ctx=self.ctx,
+            caller_identity=self.caller_identity,
+            start_time=self.start_time,
+        )
+        pest._lk_session = self.session
+        pest._lk_ctx = self._lk_ctx
+        pest.tool_executed = True
+
+        # Copy context messages
+        ctx = pest.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await pest.update_chat_ctx(ctx)
+
+        if self.session:
+            self.session.update_agent(pest)
+            await self.session.say(
+                "मी आपल्याला आमच्या कापूस कीड आणि रोग नियंत्रण तज्ज्ञांकडे हस्तांतरित करत आहे.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully to the Cotton Pest & Disease Specialist."
 
 
 server = AgentServer()
