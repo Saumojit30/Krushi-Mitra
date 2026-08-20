@@ -25,7 +25,12 @@ from livekit.plugins import openai as lk_openai  # Groq uses OpenAI-compatible A
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from logger import LatencyTracker
-from prompts import AGENT_NAME, SYSTEM_PROMPT
+from prompts import (
+    AGENT_NAME,
+    MARKET_SPECIALIST_PROMPT,
+    PEST_SPECIALIST_PROMPT,
+    SYSTEM_PROMPT,
+)
 
 # Load env variables from .env.local (never committed to git)
 load_dotenv(".env.local")
@@ -62,6 +67,7 @@ class KrushiMitra(Agent):
         user_id: str = "test-user",
         profile: dict | None = None,
         last_summary: str | None = None,
+        start_time: float | None = None,
     ) -> None:
         self.user_id = user_id
         self.profile = profile or {}
@@ -69,7 +75,7 @@ class KrushiMitra(Agent):
         self._latency = LatencyTracker()
         self._lk_session = None
         self._lk_ctx = None
-        self.start_time = None
+        self.start_time = start_time
         self.tool_executed = False
         self.error_log = None
 
@@ -455,6 +461,255 @@ class KrushiMitra(Agent):
             self.error_log = f"Failed to create escalation ticket: {e}"
             return "Error: Could not create escalation ticket due to an internal server error."
 
+    @function_tool
+    async def handoff_to_pest_specialist(self) -> str:
+        """Call this tool immediately when the farmer asks questions about crop pests,
+        insect infestation, pink bollworm, crop diseases, plant damage, or pesticide spraying.
+        This hands the call over to the specialized Cotton Pest & Disease Specialist.
+        """
+        app_logger.info("Triage handing over to Cotton Pest Specialist...")
+        pest = CottonPestSpecialist(
+            user_id=self.user_id,
+            profile=self.profile,
+            start_time=self.start_time,
+        )
+        pest._lk_session = self._lk_session
+        pest._lk_ctx = self._lk_ctx
+        pest.tool_executed = True
+
+        # Copy context messages
+        ctx = pest.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await pest.update_chat_ctx(ctx)
+
+        if self._lk_session:
+            self._lk_session.update_agent(pest)
+            await self._lk_session.say(
+                "मी आपल्याला आमच्या कापूस कीड आणि रोग नियंत्रण तज्ज्ञांकडे हस्तांतरित करत आहे. कृपया एक सेकंद थांबा.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully to the Cotton Pest & Disease Specialist."
+
+    @function_tool
+    async def handoff_to_market_specialist(self) -> str:
+        """Call this tool immediately when the farmer asks questions about Cotton Corporation of India (CCI)
+        buying centers, government MSP purchase process, moisture grading, or necessary land/bank papers.
+        This hands the call over to the specialized Cotton Market & CCI Procurement Specialist.
+        """
+        app_logger.info("Triage handing over to Cotton Market Specialist...")
+        market = CottonMarketSpecialist(
+            user_id=self.user_id,
+            profile=self.profile,
+            start_time=self.start_time,
+        )
+        market._lk_session = self._lk_session
+        market._lk_ctx = self._lk_ctx
+        market.tool_executed = True
+
+        # Copy context messages
+        ctx = market.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await market.update_chat_ctx(ctx)
+
+        if self._lk_session:
+            self._lk_session.update_agent(market)
+            await self._lk_session.say(
+                "मी आपल्याला आमच्या कापूस बाजार आणि हमीभाव तज्ज्ञांकडे हस्तांतरित करत आहे. कृपया एक सेकंद थांबा.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully to the Cotton Market & CCI procurement specialist."
+
+
+class CottonPestSpecialist(Agent):
+    """Cotton Pest & Disease Specialist Agent.
+    Focuses strictly on insect/pest infestation and crop remedies.
+    """
+
+    def __init__(
+        self,
+        user_id: str = "test-user",
+        profile: dict | None = None,
+        start_time: float | None = None,
+    ) -> None:
+        self.user_id = user_id
+        self.profile = profile or {}
+        self.start_time = start_time
+        self.tool_executed = True  # Routing to a specialist is an advisory action
+        self.error_log = None
+        self._lk_session = None
+        self._lk_ctx = None
+        super().__init__(instructions=PEST_SPECIALIST_PROMPT)
+
+    async def on_enter(self) -> None:
+        app_logger.info("CottonPestSpecialist agent entered the session.")
+        greeting = (
+            "Namaskar, mee Krushi Mitra cha Cotton Pest Specialist ahe. "
+            "Aapan कापसावरील कीड आणि रोग नियंत्रणाविषयी बोलत आहात. "
+            "मी मागील संभाषण पाहिले आहे. सांगा दादा, काय समस्या आहे?"
+        )
+        if self._lk_session:
+            await self._lk_session.say(greeting, allow_interruptions=True)
+
+    @function_tool
+    async def handoff_to_triage(self) -> str:
+        """Call this tool if the farmer stops talking about pests/diseases and asks
+        general questions about weather, registration, profile setup, or general greeting.
+        This hands the call back to the main triage agent.
+        """
+        app_logger.info("Specialist handing back to Triage Agent...")
+        triage = KrushiMitra(
+            user_id=self.user_id,
+            profile=self.profile,
+            start_time=self.start_time,
+        )
+        # Link session and context
+        triage._lk_session = self._lk_session
+        triage._lk_ctx = self._lk_ctx
+        triage.tool_executed = True
+
+        # Copy context messages
+        ctx = triage.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await triage.update_chat_ctx(ctx)
+
+        if self._lk_session:
+            self._lk_session.update_agent(triage)
+            await self._lk_session.say(
+                "मी आपल्याला आमच्या मुख्य सहाय्यकाकडे परत हस्तांतरित करत आहे.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully back to the main Triage Agent."
+
+    @function_tool
+    async def handoff_to_market_specialist(self) -> str:
+        """Call this tool if the farmer asks about MSP buying rates, CCI center location,
+        Aadhaar/7/12 extract registration documents, or government procurement grading details.
+        This hands the call over to the Cotton Market & CCI procurement specialist.
+        """
+        app_logger.info("Specialist handing over to Cotton Market Specialist...")
+        market = CottonMarketSpecialist(
+            user_id=self.user_id,
+            profile=self.profile,
+            start_time=self.start_time,
+        )
+        market._lk_session = self._lk_session
+        market._lk_ctx = self._lk_ctx
+        market.tool_executed = True
+
+        # Copy context messages
+        ctx = market.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await market.update_chat_ctx(ctx)
+
+        if self._lk_session:
+            self._lk_session.update_agent(market)
+            await self._lk_session.say(
+                "मी आपल्याला आमच्या कापूस बाजार आणि हमीभाव तज्ज्ञांकडे हस्तांतरित करत आहे.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully to the Cotton Market & CCI procurement specialist."
+
+
+class CottonMarketSpecialist(Agent):
+    """Cotton Market & CCI Procurement Specialist Agent.
+    Focuses strictly on MSP purchasing centers, APMC mandi rates, and required documentation.
+    """
+
+    def __init__(
+        self,
+        user_id: str = "test-user",
+        profile: dict | None = None,
+        start_time: float | None = None,
+    ) -> None:
+        self.user_id = user_id
+        self.profile = profile or {}
+        self.start_time = start_time
+        self.tool_executed = True  # Routing to a specialist is an advisory action
+        self.error_log = None
+        self._lk_session = None
+        self._lk_ctx = None
+        super().__init__(instructions=MARKET_SPECIALIST_PROMPT)
+
+    async def on_enter(self) -> None:
+        app_logger.info("CottonMarketSpecialist agent entered the session.")
+        greeting = (
+            "Namaskar, mee Krushi Mitra cha Cotton Market Specialist ahe. "
+            "Aapan कापूस हमीभाव आणि सीसीआय खरेदीबद्दल बोलत आहात. "
+            "मी मागील संभाषण पाहिले आहे. सांगा, खरेदी केंद्राबद्दल काय माहिती हवी आहे?"
+        )
+        if self._lk_session:
+            await self._lk_session.say(greeting, allow_interruptions=True)
+
+    @function_tool
+    async def handoff_to_triage(self) -> str:
+        """Call this tool if the farmer stops talking about market rates/procurement and asks
+        general questions about weather, registration, profile setup, or general greeting.
+        This hands the call back to the main triage agent.
+        """
+        app_logger.info("Specialist handing back to Triage Agent...")
+        triage = KrushiMitra(
+            user_id=self.user_id,
+            profile=self.profile,
+            start_time=self.start_time,
+        )
+        triage._lk_session = self._lk_session
+        triage._lk_ctx = self._lk_ctx
+        triage.tool_executed = True
+
+        # Copy context messages
+        ctx = triage.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await triage.update_chat_ctx(ctx)
+
+        if self._lk_session:
+            self._lk_session.update_agent(triage)
+            await self._lk_session.say(
+                "मी आपल्याला आमच्या मुख्य सहाय्यकाकडे परत हस्तांतरित करत आहे.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully back to the main Triage Agent."
+
+    @function_tool
+    async def handoff_to_pest_specialist(self) -> str:
+        """Call this tool if the farmer asks about crop pests, insect infestation,
+        pink bollworm, diseases, leaf curling, or pesticide spraying.
+        This hands the call over to the Cotton Pest & Disease Specialist.
+        """
+        app_logger.info("Specialist handing over to Cotton Pest Specialist...")
+        pest = CottonPestSpecialist(
+            user_id=self.user_id,
+            profile=self.profile,
+            start_time=self.start_time,
+        )
+        pest._lk_session = self._lk_session
+        pest._lk_ctx = self._lk_ctx
+        pest.tool_executed = True
+
+        # Copy context messages
+        ctx = pest.chat_ctx.copy()
+        for msg in self.chat_ctx.messages():
+            ctx.add_message(role=msg.role, content=msg.content)
+        await pest.update_chat_ctx(ctx)
+
+        if self._lk_session:
+            self._lk_session.update_agent(pest)
+            await self._lk_session.say(
+                "मी आपल्याला आमच्या कापूस कीड आणि रोग नियंत्रण तज्ज्ञांकडे हस्तांतरित करत आहे.",
+                allow_interruptions=True,
+            )
+
+        return "Transferred successfully to the Cotton Pest & Disease Specialist."
+
 
 server = AgentServer()
 
@@ -540,7 +795,9 @@ async def krushi_mitra_session(ctx: JobContext):
 
     # 5. Start the session
     import time
-    agent_instance.start_time = time.time()
+
+    if not agent_instance.start_time:
+        agent_instance.start_time = time.time()
     await session.start(
         agent=agent_instance,
         room=ctx.room,
