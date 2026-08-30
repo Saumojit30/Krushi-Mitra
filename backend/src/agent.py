@@ -31,6 +31,7 @@ from prompts import (
     PEST_SPECIALIST_PROMPT,
     SYSTEM_PROMPT,
 )
+from rag_utility import query_pest_advisory
 
 # Load env variables from .env.local (never committed to git)
 load_dotenv(".env.local")
@@ -616,6 +617,26 @@ class CottonPestSpecialist(Agent):
             )
 
         return "Transferred successfully to the Cotton Market & CCI procurement specialist."
+
+    @function_tool
+    async def get_verified_pest_remedy(self, pest_name: str) -> str:
+        """Call this tool immediately when the farmer asks for a remedy, chemical spray,
+        preventive measures, or pesticide dosage details for any cotton crop pest or disease.
+        This queries the database of government-approved agricultural advisories.
+        """
+        app_logger.info(f"RAG: Querying verified advisory for pest: {pest_name}")
+        advisory = query_pest_advisory(pest_name)
+        if advisory:
+            app_logger.info(f"RAG: Found matching advisory for pest: {pest_name}")
+            return (
+                f"Verified Advisory for {pest_name}:\n"
+                f"Advisory Details (Marathi): {advisory['advisory_text']}\n"
+                f"Chemical Recommendation: {advisory['chemical_recommendation']}\n"
+                f"Dosage Details: {advisory['dosage_details']}"
+            )
+        else:
+            app_logger.warning(f"RAG: No advisory found for pest: {pest_name}")
+            return "No verified government remedy found in the advisory database."
 
 
 class CottonMarketSpecialist(Agent):

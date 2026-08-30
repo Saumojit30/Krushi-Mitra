@@ -38,6 +38,7 @@ from livekit.plugins import openai as lk_openai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from prompts import MARKET_SPECIALIST_PROMPT, PEST_SPECIALIST_PROMPT, SYSTEM_PROMPT
+from rag_utility import query_pest_advisory
 
 logger = logging.getLogger("outbound-agent")
 
@@ -670,6 +671,26 @@ class CottonPestSpecialist(Agent):
             )
 
         return "Transferred successfully to the Cotton Market & CCI procurement specialist."
+
+    @function_tool
+    async def get_verified_pest_remedy(self, pest_name: str) -> str:
+        """Call this tool immediately when the farmer asks for a remedy, chemical spray,
+        preventive measures, or pesticide dosage details for any cotton crop pest or disease.
+        This queries the database of government-approved agricultural advisories.
+        """
+        logger.info(f"RAG: Outbound querying verified advisory for pest: {pest_name}")
+        advisory = query_pest_advisory(pest_name)
+        if advisory:
+            logger.info(f"RAG: Found matching advisory for pest: {pest_name}")
+            return (
+                f"Verified Advisory for {pest_name}:\n"
+                f"Advisory Details (Marathi): {advisory['advisory_text']}\n"
+                f"Chemical Recommendation: {advisory['chemical_recommendation']}\n"
+                f"Dosage Details: {advisory['dosage_details']}"
+            )
+        else:
+            logger.warning(f"RAG: No advisory found for pest: {pest_name}")
+            return "No verified government remedy found in the advisory database."
 
 
 class CottonMarketSpecialist(Agent):

@@ -1,0 +1,26 @@
+[
+  {
+    "pest_or_disease": "pink bollworm",
+    "advisory_text": "कापसावरील बोंड अळीच्या नियंत्रणासाठी कामगंध सापळे (pheromone traps) हेक्टरी ५ लावावेत. प्रादुर्भाव आर्थिक नुकसानीच्या पातळीवर (१०% पेक्षा जास्त) असल्यास इमामेक्टिन बेंझोएट ५% एसजी (Emamectin Bezoate 5% SG) ४ ग्रॅम प्रति १० लिटर पाण्यात मिसळून फवारणी करावी.",
+    "chemical_recommendation": "Emamectin Bezoate 5% SG",
+    "dosage_details": "4 grams per 10 liters of water"
+  },
+  {
+    "pest_or_disease": "sucking pests",
+    "advisory_text": "रस शोषण करणाऱ्या किडींच्या (मावा, तुडतुडे) नियंत्रणासाठी ५% निंबोळी अर्काची फवारणी करावी. प्रादुर्भाव जास्त असल्यास इमिडाक्लोप्रिड १७.८% एसएल ३ मिली प्रति १० लिटर पाण्यात मिसळून फवारणी करावी.",
+    "chemical_recommendation": "Imidacloprid 17.8% SL",
+    "dosage_details": "3 ml per 10 liters of water"
+  },
+  {
+    "pest_or_disease": "aphids",
+    "advisory_text": "मावा किडीच्या नियंत्रणासाठी निंबोळी अर्क ५% किंवा थायामेथोक्साम २५% डब्ल्यूपी २ ग्रॅम प्रति १० लिटर पाण्यात मिसळून फवारणी करावी.",
+    "chemical_recommendation": "Thiamethoxam 25% WP",
+    "dosage_details": "2 grams per 10 liters of water"
+  },
+  {
+    "pest_or_disease": "jassids",
+    "advisory_text": "तुडतुडे किडीच्या नियंत्रणासाठी फिप्रोनिल ५% एससी ४ मिली प्रति १० लिटर पाण्यात मिसळून फवारणी करावी.",
+    "chemical_recommendation": "Fipronil 5% SC",
+    "dosage_details": "4 ml per 10 liters of water"
+  }
+]
