@@ -15,25 +15,25 @@ logger = logging.getLogger("krushi_mitra.latency")
 @dataclass
 class TurnLatency:
     turn_id: int
-    user_speech_end_ts: float = 0.0
-    llm_first_token_ts: float = 0.0
-    tts_first_audio_ts: float = 0.0
+    user_speech_end_ts: Optional[float] = None
+    llm_first_token_ts: Optional[float] = None
+    tts_first_audio_ts: Optional[float] = None
 
     @property
     def llm_latency_ms(self) -> Optional[float]:
-        if self.user_speech_end_ts is not None and self.llm_first_token_ts:
+        if self.user_speech_end_ts is not None and self.llm_first_token_ts is not None:
             return round((self.llm_first_token_ts - self.user_speech_end_ts) * 1000, 1)
         return None
 
     @property
     def tts_latency_ms(self) -> Optional[float]:
-        if self.llm_first_token_ts is not None and self.tts_first_audio_ts:
+        if self.llm_first_token_ts is not None and self.tts_first_audio_ts is not None:
             return round((self.tts_first_audio_ts - self.llm_first_token_ts) * 1000, 1)
         return None
 
     @property
     def total_latency_ms(self) -> Optional[float]:
-        if self.user_speech_end_ts is not None and self.tts_first_audio_ts:
+        if self.user_speech_end_ts is not None and self.tts_first_audio_ts is not None:
             return round((self.tts_first_audio_ts - self.user_speech_end_ts) * 1000, 1)
         return None
 
