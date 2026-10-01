@@ -92,3 +92,7 @@ day*-latency-log.txt
 
 # ---- Vercel / Railway deploy artifacts ----
 .vercel
+
+# ---- Local scratch notes & data ----
+interviewPrep/
+*.db
