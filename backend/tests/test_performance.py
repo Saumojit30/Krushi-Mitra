@@ -4,7 +4,7 @@ Unit tests for non-blocking async IO, STT configuration, and latency tracking me
 
 import pytest
 
-from agent import get_stt_provider
+from agent import get_llm_provider, get_stt_provider
 from database import (
     async_create_escalation,
     async_get_farmer,
@@ -103,3 +103,23 @@ def test_stt_provider_configuration(monkeypatch):
     monkeypatch.setenv("STT_PROVIDER", "openai")
     stt_openai = get_stt_provider()
     assert "openai" in type(stt_openai).__module__.lower()
+
+
+def test_llm_provider_configuration(monkeypatch):
+    """Verify LLM_PROVIDER switches between Groq and Google Gemini 3 series."""
+    monkeypatch.setenv("GROQ_API_KEY", "dummy_groq_key")
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy_google_key")
+
+    # Groq provider
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_MODEL", "openai/gpt-oss-20b")
+    llm_groq = get_llm_provider()
+    assert "openai" in type(llm_groq).__module__.lower()
+    assert llm_groq._opts.model == "openai/gpt-oss-20b"
+
+    # Gemini 3 series provider
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    llm_gemini = get_llm_provider()
+    assert "google" in type(llm_gemini).__module__.lower()
+    assert llm_gemini._opts.model == "gemini-3.5-flash-lite"

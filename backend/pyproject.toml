@@ -11,6 +11,7 @@ requires-python = ">=3.10, <3.15"
 dependencies = [
     "livekit-agents[deepgram,openai,silero,turn-detector]~=1.4",
     "livekit-murf>=0.1.1",
+    "livekit-plugins-google>=1.5.2",
     "livekit-plugins-noise-cancellation~=0.2",
     "python-dotenv",
     "supabase>=2.31.0",
@@ -31,6 +32,8 @@ where = ["src"]
 "" = "src"
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = [".venv", "venv", ".git", "__pycache__"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 

@@ -34,7 +34,6 @@ from livekit.agents import (
     tokenize,
 )
 from livekit.plugins import murf, noise_cancellation, silero
-from livekit.plugins import openai as lk_openai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from prompts import MARKET_SPECIALIST_PROMPT, PEST_SPECIALIST_PROMPT, SYSTEM_PROMPT
@@ -1149,17 +1148,13 @@ async def outbound_agent(ctx: JobContext):
     await ctx.connect()
 
     # 3. Same voice pipeline as src/agent.py
-    from agent import get_stt_provider
+    from agent import get_llm_provider, get_stt_provider
 
     session = AgentSession(
         # STT: Dynamic STT provider selection
         stt=get_stt_provider(),
-        # LLM: Groq
-        llm=lk_openai.LLM(
-            model=GROQ_MODEL,
-            base_url="https://api.groq.com/openai/v1",
-            api_key=os.getenv("GROQ_API_KEY"),
-        ),
+        # LLM: Dynamic LLM provider selection (Groq or Gemini 3 series)
+        llm=get_llm_provider(),
         # TTS: Murf Falcon 2 Marathi voice
         tts=murf.TTS(
             voice=MURF_VOICE_ID,

@@ -21,7 +21,7 @@ from livekit.agents import (
     room_io,
     tokenize,
 )
-from livekit.plugins import deepgram, murf, noise_cancellation, silero
+from livekit.plugins import deepgram, google, murf, noise_cancellation, silero
 from livekit.plugins import openai as lk_openai  # Groq/OpenAI STT & LLM APIs
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
@@ -74,11 +74,45 @@ def get_stt_provider():
 
 
 # ---------------------------------------------------------------------------
-# Groq configuration (OpenAI-compatible endpoint)
-# Model: openai/gpt-oss-20b is the safe non-deprecated choice as of Aug 2026
-# Fallback: llama-3.3-70b-versatile
+# LLM configuration (Groq & Google Gemini 3 series)
+# Groq active model: openai/gpt-oss-20b
+# Gemini 3 series model: gemini-3.5-flash-lite (fast) or gemini-3.5-flash
 # ---------------------------------------------------------------------------
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").lower()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+
+
+def get_llm_provider():
+    """
+    Returns the configured LLM provider instance:
+    - LLM_PROVIDER=gemini (or if GOOGLE_API_KEY is present and GROQ_API_KEY is not):
+      Uses Google Gemini 3 series (e.g. gemini-3.5-flash-lite or gemini-3.5-flash).
+    - LLM_PROVIDER=groq (default):
+      Uses Groq via OpenAI-compatible endpoint (default model: openai/gpt-oss-20b).
+    """
+    selected_provider = os.getenv("LLM_PROVIDER", "").lower()
+    if not selected_provider:
+        if os.getenv("GOOGLE_API_KEY") and not os.getenv("GROQ_API_KEY"):
+            selected_provider = "gemini"
+        else:
+            selected_provider = "groq"
+
+    if selected_provider == "gemini":
+        model_name = os.getenv("GEMINI_MODEL", GEMINI_MODEL)
+        app_logger.info("Initializing LLM provider: Google Gemini (%s)", model_name)
+        return google.LLM(
+            model=model_name,
+            api_key=os.getenv("GOOGLE_API_KEY"),
+        )
+
+    model_name = os.getenv("GROQ_MODEL", GROQ_MODEL)
+    app_logger.info("Initializing LLM provider: Groq (%s)", model_name)
+    return lk_openai.LLM(
+        model=model_name,
+        base_url="https://api.groq.com/openai/v1",
+        api_key=os.getenv("GROQ_API_KEY"),
+    )
 
 # ---------------------------------------------------------------------------
 # Murf Falcon 2 Marathi voice
@@ -1074,13 +1108,8 @@ async def krushi_mitra_session(ctx: JobContext):
     session = AgentSession(
         # STT: Dynamic provider selection (Deepgram Nova-3 or OpenAI Whisper)
         stt=get_stt_provider(),
-        # LLM: Groq via OpenAI-compatible API
-        # Groq base_url points to api.groq.com, model = llama-3.3-70b-versatile
-        llm=lk_openai.LLM(
-            model=GROQ_MODEL,
-            base_url="https://api.groq.com/openai/v1",
-            api_key=os.getenv("GROQ_API_KEY"),
-        ),
+        # LLM: Dynamic provider selection (Groq openai/gpt-oss-20b or Gemini 3 series)
+        llm=get_llm_provider(),
         # TTS: Murf Falcon 2 — Marathi voice
         tts=murf.TTS(
             voice=MURF_VOICE_ID,

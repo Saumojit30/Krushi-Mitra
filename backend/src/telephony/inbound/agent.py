@@ -1071,17 +1071,11 @@ async def inbound_agent(ctx: JobContext):
 
     start_time = time.time()
 
-    from livekit.plugins import openai as lk_openai
-
-    from agent import get_stt_provider
+    from agent import get_llm_provider, get_stt_provider
 
     session = AgentSession(
         stt=get_stt_provider(),
-        llm=lk_openai.LLM(
-            model=GROQ_MODEL,
-            base_url="https://api.groq.com/openai/v1",
-            api_key=os.getenv("GROQ_API_KEY"),
-        ),
+        llm=get_llm_provider(),
         tts=murf.TTS(
             voice=MURF_VOICE_ID,
             style="Conversational",
