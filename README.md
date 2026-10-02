@@ -42,24 +42,25 @@ The system decouples audio transport, acoustic detection, language inference, do
 
 ```mermaid
 flowchart TD
-    subgraph Ingress ["1. Telephony & WebRTC Transport"]
+    subgraph Ingress ["1. Telephony and WebRTC Transport"]
         A1["Farmer Mobile (PSTN / 2G / 4G)"] -->|Carrier SIP Trunk| B1["LiveKit SIP Server (DID / Inbound Dispatch)"]
         A2["Web Browser / PWA"] -->|WebRTC Opus Audio| B2["LiveKit Room SFU"]
     end
 
-    subgraph AudioEngine ["2. Acoustic Preprocessing & Turn Engine"]
+    subgraph AudioEngine ["2. Acoustic Preprocessing and Turn Engine"]
         B1 --> C1["BVCTelephony Noise Canceller (8kHz Narrowband)"]
         B2 --> C2["BVC Standard Noise Canceller (Wideband)"]
-        C1 & C2 --> D["Silero VAD (activation=0.6, min_speech=100ms)"]
+        C1 --> D["Silero VAD (activation=0.6, min_speech=100ms)"]
+        C2 --> D
         D --> E["MultilingualModel Turn Detector (min_delay=300ms)"]
     end
 
-    subgraph Intelligence ["3. Intelligence & Tool Orchestration"]
+    subgraph Intelligence ["3. Intelligence and Tool Orchestration"]
         E -->|Streaming PCM Audio| F["STT: Deepgram Nova-3 (Sub-250ms) / Whisper-1"]
         F -->|Streamed Tokens + Preemptive Gen| G["LLM: Groq (openai/gpt-oss-20b) / Gemini 3 Series"]
         
-        G <-->|Async Non-blocking Tool Calls| H["Tool Ecosystem & Async TTL Cache"]
-        H <--> I1["Open-Meteo Soil & ET0 API (FAO-56)"]
+        G <-->|Async Tool Calls| H["Tool Ecosystem and Async TTL Cache"]
+        H <--> I1["Open-Meteo Soil and ET0 API (FAO-56)"]
         H <--> I2["Open-Meteo 3-Day Weather API"]
         H <--> I3["Agmarknet APMC Mandi Dataset (Cotton/Soy/Tur)"]
         H <--> I4["KVK Human Escalation Engine"]
@@ -69,13 +70,15 @@ flowchart TD
         J -->|Streamed 24kHz Opus Audio| K["Full-Duplex Audio Playback (<600ms e2e)"]
     end
 
-    subgraph Persistence ["4. State & Observability"]
+    subgraph Persistence ["4. State and Observability"]
         L["Dual Persistence: Supabase Cloud PostgreSQL + Local SQLite"]
-        M["Metrics Tracker & /healthz Probe (TTFT, TTFA, Stage Latencies)"]
+        M["Metrics Tracker and /healthz Probe (TTFT, TTFA, Stage Latencies)"]
     end
 
     G -.->|Save Fact / Session Summary| L
-    D & G & J -.->|Turn Latencies| M
+    D -.->|VAD Latency| M
+    G -.->|TTFT Latency| M
+    J -.->|TTFA Latency| M
 ```
 
 ---
@@ -102,7 +105,7 @@ To eliminate prompt bloat and prevent instruction dilution, the system organizes
 
 ```mermaid
 stateDiagram-v2
-    [*] --> TriageAgent: Inbound SIP / WebRTC Connect
+    [*] --> TriageAgent: Inbound SIP or WebRTC Connect
     
     TriageAgent --> CottonPestSpecialist: Mention of Pink Bollworm, insect damage, spraying
     CottonPestSpecialist --> TriageAgent: Return to general queries, weather, or mandi rates
@@ -110,10 +113,10 @@ stateDiagram-v2
     TriageAgent --> CottonMarketSpecialist: Inquiries on MSP rates, CCI centers, 7/12 land records
     CottonMarketSpecialist --> TriageAgent: Return to general farming queries
     
-    CottonPestSpecialist --> HumanKVK: Severe crop loss (>20%) + Farmer Consent
-    TriageAgent --> HumanKVK: Trade exploitation + Farmer Consent
+    CottonPestSpecialist --> HumanKVK: Severe crop loss (over 20%) with Farmer Consent
+    TriageAgent --> HumanKVK: Trade exploitation with Farmer Consent
     
-    TriageAgent --> [*]: Call End (Auto-summarize & Sync to DB)
+    TriageAgent --> [*]: Call End (Auto-summarize and Sync to DB)
 ```
 
 1. **Krushi Mitra (Triage Agent)**: Handles caller greeting, returning farmer memory injection, live soil moisture analysis, multi-commodity mandi pricing, and severe weather warnings.
