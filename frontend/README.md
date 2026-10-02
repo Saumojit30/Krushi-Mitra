@@ -51,19 +51,25 @@ Edit [`app-config.ts`](app-config.ts) to change branding, features, and button t
 
 ```ts
 export const APP_CONFIG_DEFAULTS: AppConfig = {
-  companyName: 'Murf AI',
-  pageTitle: 'Voice Agent Starter',
-  pageDescription: 'A voice agent powered by Murf Falcon — the fastest TTS API',
+  companyName: 'Krushi Mitra',
+  pageTitle: 'Krushi Mitra — Shetkaryasathi Voice Advisor',
+  pageDescription:
+    'Vidarbhyatil Kapas Shetkaryansathi Vishwasarha Sahayak | Trusted voice advisor for cotton farmers of Vidarbha, Maharashtra',
 
   supportsChatInput: true,
   supportsVideoInput: true,
   supportsScreenShare: true,
+  isPreConnectBufferEnabled: true,
 
-  logo: '/murf-logo.svg',
-  accent: '#6366F1',
-  logoDark: '/murf-logo-dark.svg',
-  accentDark: '#818cf8',
-  startButtonText: 'Start talking',
+  logo: '/cotton-logo-icon.png',
+  accent: '#2d6a4f', // Deep green — agriculture
+  logoDark: '/cotton-logo-icon.png',
+  accentDark: '#52b788',
+  startButtonText: 'कॉल सुरू करा (Start Call)',
+
+  audioVisualizerType: 'aura',
+  audioVisualizerColor: '#d4af37',
+  audioVisualizerColorDark: '#d4af37',
 
   agentName: process.env.AGENT_NAME ?? undefined,
 };

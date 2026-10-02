@@ -1,251 +1,147 @@
-# Backend — Voice Agent with Murf Falcon TTS
+# Krushi Mitra — Backend Voice AI Service
 
-The Python backend for the Voice Agent Starter. It runs a real-time voice AI pipeline using [LiveKit Agents](https://docs.livekit.io/agents), connecting Murf Falcon TTS, Deepgram STT, and Google Gemini into a single conversational agent.
+The Python backend for **Krushi Mitra** (कृषी मित्र), a production-grade, ultra-low-latency multilingual Voice AI advisory service for cotton and cash-crop farmers in the Vidarbha region of Maharashtra, India.
 
-## How It Works
+Built on the [LiveKit Agents SDK](https://docs.livekit.io/agents), it connects Murf Falcon 2 GEN2 streaming Marathi TTS, Deepgram Nova-3 multilingual STT, and fast LLM inference (Groq / Google Gemini 3 series) into a full-duplex conversational voice pipeline.
+
+---
+
+## Architecture & Voice Pipeline
 
 ```
-User speaks → [Deepgram STT] → text → [Gemini LLM] → response → [Murf Falcon TTS] → audio → User hears
+[Farmer Speaks] ──► [LiveKit WebRTC / SIP] ──► [Deepgram Nova-3 STT]
+                                                       │ (Marathi / Hindi text)
+                                                       ▼
+[Farmer Hears]  ◄── [Murf Falcon 2 GEN2 TTS] ◄── [Groq / Gemini 3 LLM]
+                     (mr-IN-shilpa voice)              │
+                                                       ├──► [Open-Meteo Weather API]
+                                                       ├──► [APMC Mandi Price Dataset]
+                                                       ├──► [CIB Pest Advisory RAG]
+                                                       └──► [Supabase / SQLite Memory]
 ```
 
-LiveKit handles the real-time audio transport. The agent connects to LiveKit as a participant, listens for user speech, and responds with synthesized audio.
+### Key Components:
+- **Audio Transport:** LiveKit Agents SFU for WebRTC browser calls and carrier SIP trunks (`BVCTelephony` noise suppression for 8kHz phone lines).
+- **Speech-to-Text (STT):** Deepgram Nova-3 (`model="nova-3", language="multi"`) with optional OpenAI Whisper fallback (`whisper-1`) for regional Varhadi dialect accuracy.
+- **Large Language Model (LLM):** Dynamic provider selection supporting **Groq** (`openai/gpt-oss-20b`) and **Google Gemini 3 series** (`gemini-3.5-flash-lite` or `gemini-3.5-flash`).
+- **Text-to-Speech (TTS):** Murf Falcon 2 GEN2 (`voice="mr-IN-shilpa"`, style="Conversational", single-sentence chunking `min_sentence_len=1`).
+- **Turn Detection:** Silero VAD + LiveKit Multilingual Turn Detector with 300ms endpointing delay and preemptive generation.
 
-## Setup
+---
 
-### 1. Install dependencies
+## Setup & Local Development
+
+### 1. Install Dependencies
+
+Ensure Python 3.10+ and [`uv`](https://docs.astral.sh/uv/) are installed:
 
 ```bash
 cd backend
 uv sync
 ```
 
-### 2. Configure environment
+### 2. Configure Environment Variables
 
 ```bash
 cp .env.example .env.local
 ```
 
-Fill in your keys in `.env.local`:
+Fill in your API keys in `.env.local`:
 
-| Variable             | Where to get it                                           |
-| -------------------- | --------------------------------------------------------- |
-| `LIVEKIT_URL`        | [LiveKit Cloud](https://cloud.livekit.io/) → Settings     |
-| `LIVEKIT_API_KEY`    | [LiveKit Cloud](https://cloud.livekit.io/) → Settings     |
-| `LIVEKIT_API_SECRET` | [LiveKit Cloud](https://cloud.livekit.io/) → Settings     |
-| `MURF_API_KEY`       | [murf.ai/api/dashboard](https://murf.ai/api/dashboard)    |
-| `DEEPGRAM_API_KEY`   | [deepgram.com](https://console.deepgram.com/)             |
-| `GOOGLE_API_KEY`     | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| Variable | Description | Where to Get |
+| :--- | :--- | :--- |
+| `LIVEKIT_URL` | LiveKit Cloud WebSocket URL | [cloud.livekit.io](https://cloud.livekit.io/) |
+| `LIVEKIT_API_KEY` | LiveKit Project API Key | [cloud.livekit.io](https://cloud.livekit.io/) |
+| `LIVEKIT_API_SECRET` | LiveKit Project API Secret | [cloud.livekit.io](https://cloud.livekit.io/) |
+| `MURF_API_KEY` | Murf Falcon 2 TTS API Key | [murf.ai/api/dashboard](https://murf.ai/api/dashboard) |
+| `MURF_VOICE_ID` | Marathi voice ID (default: `mr-IN-shilpa`) | [murf.ai/api/docs](https://murf.ai/api/docs) |
+| `DEEPGRAM_API_KEY` | Deepgram STT API Key | [console.deepgram.com](https://console.deepgram.com/) |
+| `STT_PROVIDER` | `deepgram` (default) or `openai` (Whisper) | Built-in |
+| `LLM_PROVIDER` | `groq` or `gemini` (auto-detected if unset) | Built-in |
+| `GROQ_API_KEY` | Groq Cloud API Key | [console.groq.com](https://console.groq.com) |
+| `GROQ_MODEL` | Active Groq model (`openai/gpt-oss-20b`) | [console.groq.com/docs/models](https://console.groq.com/docs/models) |
+| `GOOGLE_API_KEY` | Gemini API Key & RAG Embeddings | [aistudio.google.com](https://aistudio.google.com) |
+| `GEMINI_MODEL` | Gemini 3 model (`gemini-3.5-flash-lite`) | [aistudio.google.com](https://aistudio.google.com) |
+| `SUPABASE_URL` | *(Optional)* Supabase PostgreSQL URL | [supabase.com](https://supabase.com) |
+| `SUPABASE_KEY` | *(Optional)* Supabase Service Key | [supabase.com](https://supabase.com) |
 
-For LiveKit Cloud users, you can auto-populate LiveKit credentials:
-
-```bash
-lk cloud auth
-lk app env -w -d .env.local
-```
-
-### 3. Download models
+### 3. Download Model Weights (First Time Only)
 
 ```bash
 uv run python src/agent.py download-files
 ```
 
-This downloads Silero VAD and the LiveKit turn detector models.
+This pre-loads Silero VAD and LiveKit turn detection models.
 
-### 4. Run the agent
+### 4. Run the Agent
 
 ```bash
-# Development mode (auto-reload)
+# Development mode with auto-reload
 uv run python src/agent.py dev
 
-# Or test directly in your terminal (no frontend needed)
+# Terminal console testing (no browser required)
 uv run python src/agent.py console
 
-# Production
+# Production worker
 uv run python src/agent.py start
 ```
 
-## Configuration
+---
 
-All configuration lives in [`src/agent.py`](src/agent.py).
+## Multi-Agent Domain Specialization
 
-### System prompt
+All agent prompts and specialized roles live in [`src/prompts.py`](src/prompts.py) and [`src/agent.py`](src/agent.py):
 
-The `SYSTEM_PROMPT` constant at the top of `agent.py` controls what your agent does. Change it to build any voice-powered use case.
+1. **Krushi Mitra (Triage Generalist)**: Initial caller greeting, returning farmer profile recognition, weather forecasts, and APMC mandi rates.
+2. **Cotton Pest Specialist (`CottonPestSpecialist`)**: Integrated Pest Management (IPM), pheromone traps, and CIB-verified government remedy lookup (`get_verified_pest_remedy`).
+3. **Cotton Market Specialist (`CottonMarketSpecialist`)**: Cotton Corporation of India (CCI) center selling procedures, 7/12 land records, Aadhaar/bank documents, and moisture discount bands.
 
-#### Example prompts
+---
 
-**Customer Support (default):**
+## Available Tools
 
-```
-You are a friendly and efficient customer support agent for a tech company. Help users with account issues, billing questions, and product troubleshooting. Be concise, empathetic, and solution-oriented. If you don't know something, say so honestly and offer to escalate.
-```
+The agent uses autonomous function-calling tools:
 
-**Language Tutor:**
+- `get_farmer_profile` / `save_farmer_profile`: Reads and writes farmer profiles with explicit verbal consent.
+- `get_last_call_summary`: Retrieves the previous conversation context for returning callers.
+- `get_weather_forecast`: Queries real-time 3-day precipitation probability and temperatures from Open-Meteo.
+- `get_cotton_mandi_prices`: Retrieves APMC cotton rates (Yavatmal, Amravati, Akola, Wardha) with MSP benchmarks.
+- `get_verified_pest_remedy`: RAG query matching pest symptoms against official CIB agricultural advisories.
+- `create_escalation`: Generates an escalation ticket to a human KVK agricultural officer.
+- `handoff_to_pest_specialist` / `handoff_to_market_specialist` / `handoff_to_triage`: Seamless domain handoffs.
 
-```
-You are a patient and encouraging language tutor helping the user practice conversational Spanish. Speak primarily in Spanish but switch to English to explain grammar or vocabulary when needed. Correct mistakes gently and suggest better phrasing. Keep conversations natural and fun.
-```
+---
 
-**AI Receptionist:**
+## Telephony Support (Inbound & Outbound)
 
-```
-You are a professional receptionist for a medical clinic. Help callers schedule appointments, answer questions about office hours and services, and take messages for doctors. Be warm but efficient. Ask for the caller's name and reason for calling upfront.
-```
+Located in [`src/telephony/`](src/telephony/):
 
-**Interview Coach:**
-
-```
-You are an experienced interview coach. Conduct mock interviews with the user for software engineering roles. Ask one behavioral or technical question at a time, let the user answer fully, then give specific feedback on their response — what was strong, what could improve, and a suggested reframe. Keep the tone encouraging but honest.
-```
-
-**Sales Assistant:**
-
-```
-You are a knowledgeable sales assistant for an electronics store. Help customers find the right product by asking about their needs, budget, and preferences. Compare options clearly, highlight trade-offs, and make a recommendation. Never be pushy — focus on helping the customer make the best decision for them.
-```
-
-**Fitness Coach:**
-
-```
-You are an upbeat personal fitness coach. Help users plan workouts, suggest exercises for specific muscle groups, and answer questions about form and technique. Ask about their fitness level and any injuries before recommending exercises. Keep instructions clear and motivating.
-```
-
-**Storyteller / Bedtime Narrator:**
-
-```
-You are a creative storyteller who tells original bedtime stories for children aged 4–8. Ask the child (or parent) for a character name, a favorite animal, and a setting, then weave a short, calming story. Use vivid but simple language. End each story on a peaceful, sleepy note.
-```
-
-**Meeting Summarizer:**
-
-```
-You are a meeting assistant. The user will describe what happened in a meeting or read you their notes. Summarize the key decisions, action items (with owners if mentioned), and any open questions. Be concise and structured. Ask clarifying questions if something is ambiguous.
-```
-
-**Trivia Game Host:**
-
-```
-You are an enthusiastic trivia game host. Ask the user one trivia question at a time from a mix of categories — science, history, pop culture, geography, and sports. Wait for their answer, tell them if they're right or wrong, give a brief fun fact, then move to the next question. Keep score and announce it every 5 questions.
-```
-
-**Mental Health Check-in Companion:**
-
-```
-You are a gentle, non-clinical wellness companion. Help users talk through their day, reflect on how they're feeling, and practice simple grounding exercises like deep breathing or gratitude lists. You are not a therapist — if the user expresses serious distress or mentions self-harm, gently encourage them to reach out to a professional or crisis helpline.
-```
-
-### Voice
-
-Set the `voice` argument in the `murf.TTS(...)` call:
-
-```python
-tts=murf.TTS(
-    voice="en-US-matthew",    # Change this
-    style="Conversation",
-    tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
-    text_pacing=True
-)
-```
-
-Some voice options:
-
-| Voice ID | Description                      |
-| -------- | -------------------------------- |
-| `Anisha` | Indian English, female (default) |
-| `Pooja`  | Indian English, female           |
-| `Samar`  | Indian English, male             |
-| `Amara`  | US English, female               |
-| `Hazel`  | UK English, female               |
-| `Bertie` | UK English, male                 |
-| `Gordon` | US English, male                 |
-
-Browse all 150+ voices: [Murf Voice Library](https://murf.ai/api/docs/voices-styles/voice-library).
-
-### STT (Speech-to-Text)
-
-Default is Deepgram Nova-3. Change in the `AgentSession(stt=...)` call:
-
-```python
-stt=deepgram.STT(model="nova-3")
-```
-
-### LLM
-
-Default is Google Gemini. To switch:
-
-- **Gemini (default):** Set `GOOGLE_API_KEY` in `.env.local`
-- **OpenAI:** Set `OPENAI_API_KEY`, install `livekit-agents[openai]`, and change the `llm=` argument
-
-## Telephony
-
-To connect the agent to a real phone number — answering incoming calls or placing outgoing ones — see [`src/telephony/`](src/telephony/). It contains two self-contained starters (`inbound/` and `outbound/`) that reuse this same voice pipeline, plus SIP trunk and dispatch rule templates.
+- **Inbound Agent ([`inbound/agent.py`](src/telephony/inbound/agent.py))**: Answers incoming phone calls from Indian telephone numbers via LiveKit SIP dispatch rules.
+- **Outbound Agent ([`outbound/agent.py`](src/telephony/outbound/agent.py))**: Automated advisory and alert dialer.
 
 ```bash
-uv run python src/telephony/inbound/agent.py dev              # answer calls
-uv run python src/telephony/outbound/dial.py --to +15551234567  # place a call
+# Start inbound phone listener
+uv run python src/telephony/inbound/agent.py dev
+
+# Place an outbound test call
+uv run python src/telephony/outbound/dial.py --to +91XXXXXXXXXX
 ```
 
-No extra dependencies required. Full setup guide: [`src/telephony/README.md`](src/telephony/README.md).
+---
 
-## Testing
-
-The project includes an eval suite based on the LiveKit Agents [testing framework](https://docs.livekit.io/agents/build/testing/):
+## Testing & Quality Assurance
 
 ```bash
-uv run pytest
+# Run unit and performance tests
+uv run pytest tests/test_performance.py -v
+
+# Run linting and formatting
+uv run ruff check .
+uv run ruff format --check .
 ```
 
-Tests are in [`tests/test_agent.py`](tests/test_agent.py) and use LLM-as-judge evaluations to verify the agent behaves correctly (friendly greetings, grounding, refusing harmful requests).
-
-To run tests in CI, you'll need to add `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` as repository secrets.
-
-## Deployment
-
-### Railway
-
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/tIVCF1?referralCode=cNjn2P&utm_medium=integration&utm_source=template&utm_campaign=generic)
-
-Set these environment variables in Railway:
-
-- `MURF_API_KEY`
-- `DEEPGRAM_API_KEY`
-- `GOOGLE_API_KEY`
-- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
-
-### Docker
-
-A production-ready [Dockerfile](Dockerfile) is included:
-
-```bash
-docker build -t murf-voice-agent .
-docker run --env-file .env.local murf-voice-agent
-```
-
-## Project Structure
-
-```
-backend/
-├── src/
-│   ├── agent.py          # Agent entrypoint — pipeline, prompt, config
-│   └── telephony/        # Optional — phone call agents
-│       ├── README.md     # SIP setup guide
-│       ├── inbound/      # agent.py + trunk & dispatch rule templates
-│       └── outbound/     # agent.py, dial.py + trunk template
-├── tests/
-│   └── test_agent.py     # LLM-judged eval suite
-├── .env.example           # Environment variable template
-├── pyproject.toml         # Python dependencies (uv)
-├── Dockerfile             # Production container
-└── railway.toml           # Railway deploy config
-```
-
-## Links
-
-- [Murf Falcon TTS Docs](https://murf.ai/api/docs/text-to-speech/streaming)
-- [Murf Voice Library](https://murf.ai/api/docs/voices-styles/voice-library)
-- [LiveKit Agents Docs](https://docs.livekit.io/agents)
-- [Deepgram Nova-3 Docs](https://developers.deepgram.com)
+---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](../LICENSE).

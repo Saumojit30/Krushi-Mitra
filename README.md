@@ -3,8 +3,8 @@
 
 [![LiveKit Agents](https://img.shields.io/badge/Framework-LiveKit%20Agents-002cf2)](https://docs.livekit.io/agents)
 [![TTS - Murf Falcon 2](https://img.shields.io/badge/TTS-Murf%20Falcon%202%20GEN2-6366F1)](https://murf.ai/api/docs/text-to-speech-models/falcon-2)
-[![LLM - Groq LLaMA 3.3 70B](https://img.shields.io/badge/LLM-Groq%20LLaMA%203.3%2070B-f55036)](https://groq.com)
-[![STT - Deepgram Nova-3](https://img.shields.io/badge/STT-Deepgram%20Nova--3-13EF93)](https://developers.deepgram.com)
+[![LLM - Groq & Gemini 3](https://img.shields.io/badge/LLM-Groq%20%7C%20Gemini%203%20Series-f55036)](https://console.groq.com)
+[![STT - Deepgram Nova-3](https://img.shields.io/badge/STT-Deepgram%20Nova--3%20%7C%20Whisper-13EF93)](https://developers.deepgram.com)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Next.js 14](https://img.shields.io/badge/Frontend-Next.js%2014-black?logo=next.js&logoColor=white)](https://nextjs.org/)
 [![Tests Passing](https://img.shields.io/badge/Tests-72%20Passed-brightgreen)](./backend/tests)
@@ -18,7 +18,7 @@ Unlike standard text chatbots or rigid IVR phone trees, Krushi Mitra operates as
 
 ## Technical Highlights
 
-- **Sub-600ms Time-to-First-Audio (TTFA)**: Combines pre-warmed Silero VAD (0.6 activation threshold), LiveKit multilingual turn detection (300ms dynamic endpointing), Groq LLaMA 3.3 70B preemptive token streaming, and Murf Falcon 2 GEN2 single-sentence tokenization (`min_sentence_len=1`).
+- **Sub-600ms Time-to-First-Audio (TTFA)**: Combines pre-warmed Silero VAD (0.6 activation threshold), LiveKit multilingual turn detection (300ms dynamic endpointing), Groq (`openai/gpt-oss-20b`) / Gemini 3 series preemptive token streaming, and Murf Falcon 2 GEN2 single-sentence tokenization (`min_sentence_len=1`).
 - **Audio-First Spoken Marathi & Full-Duplex Dialogue**: Generates phonetically spelled Marathi numbers and currencies (*"सात हजार पाचशे रुपये प्रति क्विंटल"* instead of raw symbols `₹7,500`), incorporates regional conversational markers (*"होय"*, *"समजलं"*, *"एकच मिनिट तपासतो"*), and supports instantaneous barge-in interruption recovery.
 - **Multi-Agent Specialist Orchestration**: Context-preserving dynamic routing between the **Triage Generalist**, **Cotton Pest Specialist** (Integrated Pest Management backed by verified government remedies), and **Cotton Market Specialist** (APMC rates, MSP benchmarks, and CCI procurement documentation).
 - **Live Real-Time Agricultural Telemetry**:
@@ -56,7 +56,7 @@ flowchart TD
 
     subgraph Intelligence ["3. Intelligence & Tool Orchestration"]
         E -->|Streaming PCM Audio| F["STT: Deepgram Nova-3 (Sub-250ms) / Whisper-1"]
-        F -->|Streamed Tokens + Preemptive Gen| G["LLM: Groq LLaMA 3.3 70B Versatile"]
+        F -->|Streamed Tokens + Preemptive Gen| G["LLM: Groq (openai/gpt-oss-20b) / Gemini 3 Series"]
         
         G <-->|Async Non-blocking Tool Calls| H["Tool Ecosystem & Async TTL Cache"]
         H <--> I1["Open-Meteo Soil & ET0 API (FAO-56)"]
@@ -89,7 +89,7 @@ Traditional cloud voice bots suffer from 2,500ms to 4,000ms of dead air, making 
 | **Silence / VAD Endpointing** | 800ms – 1,000ms fixed timer | `MultilingualModel(min_endpointing_delay=0.30s)` + Silero VAD | **300 ms** |
 | **Turn Overlap (Savings)** | Sequential execution (0ms) | **Preemptive Generation**: LLM starts on tentative speech boundary | **-150 ms** |
 | **Speech-to-Text (STT)** | 600ms batch HTTP upload | Deepgram Nova-3 continuous streaming | **~150 ms** |
-| **LLM Inference (TTFT)** | 700ms – 1,200ms cloud inference | Groq LPU LLaMA 3.3 70B Versatile | **~160 ms** |
+| **LLM Inference (TTFT)** | 700ms – 1,200ms cloud inference | Groq LPU (`openai/gpt-oss-20b`) / Gemini 3.5 Flash-Lite | **~160 ms** |
 | **TTS Chunk Generation** | 600ms full-sentence buffer | Murf Falcon 2 GEN2 streaming (`min_sentence_len=1`) | **~120 ms** |
 | **Transport & Audio Decoding** | 100ms HTTP polling | LiveKit WebRTC / SIP UDP audio frame streaming | **~40 ms** |
 | **Total Turnaround Time** | **~3,500 ms (Unnatural)** | **End-to-End Time-to-First-Audio (TTFA)** | **~580 – 620 ms** |
@@ -193,10 +193,17 @@ LIVEKIT_API_SECRET=your_livekit_api_secret
 # AI Models & Audio Providers
 MURF_API_KEY=your_murf_falcon_api_key
 MURF_VOICE_ID=mr-IN-shilpa
-GROQ_API_KEY=your_groq_api_key
-GROQ_MODEL=llama-3.3-70b-versatile
 DEEPGRAM_API_KEY=your_deepgram_api_key
 STT_PROVIDER=deepgram
+
+# LLM Provider Configuration ("groq" or "gemini")
+LLM_PROVIDER=groq
+GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL=openai/gpt-oss-20b
+
+# Alternative: Google Gemini 3 Series
+GOOGLE_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-3.5-flash-lite
 
 # Optional Database & Telephony Persistence
 # SUPABASE_URL=https://your-project.supabase.co

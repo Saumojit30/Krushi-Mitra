@@ -5,7 +5,7 @@ Connect the voice agent to real phone numbers. Two starters:
 - **[`inbound/`](inbound/)** — someone calls your number, the agent answers
 - **[`outbound/`](outbound/)** — the agent calls someone
 
-Both use the same voice pipeline as [`src/agent.py`](../agent.py) (Deepgram STT → Gemini → Murf Falcon TTS), so anything you learn there applies here.
+Both use the same voice pipeline as [`src/agent.py`](../agent.py) (Deepgram STT / Whisper → Groq / Gemini 3 → Murf Falcon 2 Marathi TTS), so anything you learn there applies here.
 
 ## How it works
 
