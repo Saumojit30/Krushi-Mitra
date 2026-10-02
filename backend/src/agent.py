@@ -4,6 +4,7 @@ Cotton Farmer Advisory | Vidarbha, Maharashtra | Track: Farm & Field
 Day 1: Foundation — voice pipeline with Marathi Murf Falcon 2 TTS + Groq LLM
 """
 
+import json
 import logging
 import os
 
@@ -21,7 +22,7 @@ from livekit.agents import (
     tokenize,
 )
 from livekit.plugins import deepgram, murf, noise_cancellation, silero
-from livekit.plugins import openai as lk_openai  # Groq uses OpenAI-compatible API
+from livekit.plugins import openai as lk_openai  # Groq/OpenAI STT & LLM APIs
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from logger import LatencyTracker
@@ -31,12 +32,46 @@ from prompts import (
     PEST_SPECIALIST_PROMPT,
     SYSTEM_PROMPT,
 )
-from rag_utility import query_pest_advisory
+from rag_utility import query_pest_advisory_async
 
 # Load env variables from .env.local (never committed to git)
 load_dotenv(".env.local")
 
 app_logger = logging.getLogger("krushi_mitra")
+
+# In-memory cache for static mandi prices dataset to eliminate synchronous file IO
+_MANDI_PRICES_CACHE: dict | None = None
+
+
+def _get_mandi_prices_data() -> dict:
+    global _MANDI_PRICES_CACHE
+    if _MANDI_PRICES_CACHE is None:
+        mandi_file = os.path.join(os.path.dirname(__file__), "mandi_prices.json")
+        if os.path.exists(mandi_file):
+            try:
+                with open(mandi_file, encoding="utf-8") as f:
+                    _MANDI_PRICES_CACHE = json.load(f)
+            except Exception as e:
+                app_logger.error("Failed to load mandi_prices.json: %s", e)
+                _MANDI_PRICES_CACHE = {}
+        else:
+            _MANDI_PRICES_CACHE = {}
+    return _MANDI_PRICES_CACHE
+
+
+def get_stt_provider():
+    """
+    Returns the configured STT provider instance.
+    STT_PROVIDER=openai: Uses OpenAI Whisper model (superior dialect accuracy & Hinglish/Marathi code-switching).
+    STT_PROVIDER=deepgram (default): Uses Deepgram Nova-3 (sub-300ms streaming latency).
+    """
+    provider = os.getenv("STT_PROVIDER", "deepgram").lower()
+    if provider == "openai":
+        app_logger.info("Initializing STT provider: OpenAI Whisper (mr)")
+        return lk_openai.STT(model="whisper-1", language="mr")
+    app_logger.info("Initializing STT provider: Deepgram Nova-3 (multi)")
+    return deepgram.STT(model="nova-3", language="multi")
+
 
 # ---------------------------------------------------------------------------
 # Groq configuration (OpenAI-compatible endpoint)
@@ -185,9 +220,9 @@ class KrushiMitra(Agent):
                     summary_text = response.text.strip()
 
                     if summary_text:
-                        from database import save_call_summary
+                        from database import async_save_call_summary
 
-                        save_call_summary(
+                        await async_save_call_summary(
                             self.user_id,
                             summary_text,
                             duration_seconds=duration,
@@ -206,9 +241,9 @@ class KrushiMitra(Agent):
                     app_logger.error("Failed to generate or save call summary: %s", e)
             else:
                 try:
-                    from database import save_call_summary
+                    from database import async_save_call_summary
 
-                    save_call_summary(
+                    await async_save_call_summary(
                         self.user_id,
                         "Call connected but no dialogue took place.",
                         duration_seconds=duration,
@@ -225,9 +260,9 @@ class KrushiMitra(Agent):
 
         Use this at the beginning of the call if you need to double-check their records.
         """
-        from database import get_farmer
+        from database import async_get_farmer
 
-        profile = get_farmer(self.user_id)
+        profile = await async_get_farmer(self.user_id)
         if profile:
             return f"Farmer Profile: {profile}"
         return "No profile found for this caller."
@@ -242,26 +277,14 @@ class KrushiMitra(Agent):
         irrigation_type: str | None = None,
         consent_given: bool = False,
     ) -> str:
-        """Save or update the farmer's profile information.
-
-        Parameters:
-        - name: The farmer's name.
-        - crops_grown: The crops they grow (e.g., 'cotton').
-        - land_size_acres: The size of their farm in acres.
-        - district: The district they reside in (e.g., 'Yavatmal', 'Amravati').
-        - irrigation_type: Their farm's irrigation type (e.g., 'rainfed', 'drip').
-        - consent_given: True if the farmer explicitly agreed to save this information.
-
-        IMPORTANT: You must ask the farmer for permission before calling this tool.
-        If they say no, do not call this tool. If they say yes, set consent_given=True.
-        """
+        """Save or update the farmer's profile information."""
         if not consent_given:
             return (
                 "Error: You must ask the farmer for explicit permission before saving their details. "
                 "Ask 'Is it okay if I remember your details for next time?' and call this tool only if they agree."
             )
 
-        from database import save_farmer
+        from database import async_save_farmer
 
         facts = {}
         if crops_grown is not None:
@@ -273,16 +296,16 @@ class KrushiMitra(Agent):
         if irrigation_type is not None:
             facts["irrigation_type"] = irrigation_type
 
-        save_farmer(user_id=self.user_id, name=name, facts=facts)
+        await async_save_farmer(user_id=self.user_id, name=name, facts=facts)
         self.tool_executed = True
         return "Profile successfully saved/updated."
 
     @function_tool
     async def get_last_call_summary(self) -> str:
         """Retrieve a summary of the last conversation with this farmer."""
-        from database import get_last_call_summary
+        from database import async_get_last_call_summary
 
-        summary = get_last_call_summary(self.user_id)
+        summary = await async_get_last_call_summary(self.user_id)
         if summary:
             return f"Last call summary: {summary}"
         return "No previous call history found."
@@ -319,6 +342,16 @@ class KrushiMitra(Agent):
             lat, lon = coords[cleaned_district]
             target_name = district.strip().capitalize()
 
+        from cache import telemetry_cache
+
+        cache_key = (
+            f"weather_{cleaned_district if cleaned_district in coords else 'yavatmal'}"
+        )
+        cached = await telemetry_cache.get(cache_key)
+        if cached:
+            self.tool_executed = True
+            return cached
+
         url = (
             f"https://api.open-meteo.com/v1/forecast"
             f"?latitude={lat}&longitude={lon}"
@@ -353,7 +386,9 @@ class KrushiMitra(Agent):
 
                 forecast_str = "\n".join(forecasts)
                 self.tool_executed = True
-                return f"Live 3-day weather forecast for {target_name} (retrieved today):\n{forecast_str}"
+                result_msg = f"Live 3-day weather forecast for {target_name} (retrieved today):\n{forecast_str}"
+                await telemetry_cache.set(cache_key, result_msg)
+                return result_msg
 
         except asyncio.TimeoutError:
             app_logger.error("Weather API call timed out.")
@@ -365,17 +400,124 @@ class KrushiMitra(Agent):
             return "Error: Failed to connect to the weather service due to a technical error."
 
     @function_tool
-    async def get_cotton_mandi_prices(self, district: str) -> str:
-        """Fetch the cotton mandi (APMC) market prices for a specific district in Vidarbha (Yavatmal, Amravati, Akola, Wardha).
+    async def get_soil_and_irrigation_advisory(self, district: str) -> str:
+        """Fetch live soil moisture (0-3cm) and daily evapotranspiration (ET0) for a specific district
+        in Vidarbha (Yavatmal, Amravati, Akola, Wardha) to provide scientific irrigation advice for cotton crops.
 
         Parameters:
         - district: The district name (e.g., 'Yavatmal', 'Amravati', 'Akola', 'Wardha').
 
-        Use this when the farmer asks about cotton rates, market prices, or mandi rates.
+        Use this when the farmer asks if they need to irrigate their cotton field, checks soil moisture conditions, or asks about water management.
         """
-        import json
-        import os
+        import asyncio
 
+        import aiohttp
+
+        coords = {
+            "yavatmal": (20.389, 78.131),
+            "amravati": (20.932, 77.752),
+            "akola": (20.700, 77.008),
+            "wardha": (20.745, 78.602),
+        }
+
+        cleaned_district = district.strip().lower()
+        if cleaned_district not in coords:
+            app_logger.warning(
+                "Unrecognized district requested for soil data: %s. Defaulting to Yavatmal.",
+                district,
+            )
+            lat, lon = coords["yavatmal"]
+            target_name = "Yavatmal (default)"
+        else:
+            lat, lon = coords[cleaned_district]
+            target_name = district.strip().capitalize()
+
+        from cache import telemetry_cache
+
+        cache_key = (
+            f"soil_{cleaned_district if cleaned_district in coords else 'yavatmal'}"
+        )
+        cached = await telemetry_cache.get(cache_key)
+        if cached:
+            self.tool_executed = True
+            return cached
+
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            f"&hourly=soil_moisture_0_to_1cm"
+            f"&daily=et0_fao_evapotranspiration"
+            f"&timezone=Asia%2FKolkata&forecast_days=1"
+        )
+
+        try:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(url, timeout=aiohttp.ClientTimeout(total=5.0)) as response,
+            ):
+                if response.status != 200:
+                    return f"Error: Could not retrieve soil data. API responded with status {response.status}."
+
+                data = await response.json()
+                hourly = data.get("hourly", {})
+                daily = data.get("daily", {})
+
+                moisture_readings = hourly.get("soil_moisture_0_to_1cm", [])
+                et0_readings = daily.get("et0_fao_evapotranspiration", [])
+
+                valid_moisture = [
+                    m for m in moisture_readings if isinstance(m, (int, float))
+                ]
+                if not valid_moisture:
+                    return "Error: Soil moisture data was unavailable."
+
+                avg_moisture = sum(valid_moisture) / len(valid_moisture)
+                moisture_pct = round(avg_moisture * 100, 1)
+                valid_et0 = [e for e in et0_readings if isinstance(e, (int, float))]
+                et0_val = valid_et0[0] if valid_et0 else 3.5
+
+                if moisture_pct < 15.0:
+                    status = "Water Deficit / Dry"
+                    advice = (
+                        "Soil moisture is critically low. If your cotton crop is in flowering or boll development stage, "
+                        "provide light drip irrigation in the morning or evening to prevent flower and boll drop."
+                    )
+                elif moisture_pct <= 32.0:
+                    status = "Adequate / Optimal"
+                    advice = (
+                        "Soil root zone has sufficient moisture. No urgent irrigation is needed today. "
+                        "Rainfed crops are healthy."
+                    )
+                else:
+                    status = "High Moisture / Saturated"
+                    advice = (
+                        "Soil has excessive moisture. Ensure drainage channels are clear to prevent waterlogging, "
+                        "root rot, or fungal wilt."
+                    )
+
+                self.tool_executed = True
+                result_msg = (
+                    f"Live Soil & Irrigation telemetry for {target_name}:\n"
+                    f"- Topsoil Moisture: {moisture_pct}% (m3/m3 equivalent: {round(avg_moisture, 3)})\n"
+                    f"- Moisture Status: {status}\n"
+                    f"- Daily Evapotranspiration Loss (ET0): {et0_val} mm/day\n"
+                    f"- Agronomic Advice: {advice}"
+                )
+                await telemetry_cache.set(cache_key, result_msg)
+                return result_msg
+
+        except asyncio.TimeoutError:
+            app_logger.error("Soil moisture API call timed out.")
+            self.error_log = "Soil API timed out"
+            return "Error: The soil moisture sensor service timed out. Recommend manually checking root zone moisture by digging 2 inches."
+        except Exception as e:
+            app_logger.error("Soil API failed: %s", e)
+            self.error_log = f"Soil API failed: {e}"
+            return "Error: Failed to fetch live soil data due to a network error."
+
+    @function_tool
+    async def get_cotton_mandi_prices(self, district: str) -> str:
+        """Fetch the cotton mandi (APMC) market prices for a specific district in Vidarbha (Yavatmal, Amravati, Akola, Wardha)."""
         cleaned_district = district.strip().lower()
         target_district = None
         for key in ["Yavatmal", "Amravati", "Akola", "Wardha"]:
@@ -390,13 +532,7 @@ class KrushiMitra(Agent):
             )
 
         try:
-            mandi_file = os.path.join(os.path.dirname(__file__), "mandi_prices.json")
-            if not os.path.exists(mandi_file):
-                return "Error: Mandi prices dataset is missing."
-
-            with open(mandi_file) as f:
-                data = json.load(f)
-
+            data = _get_mandi_prices_data()
             prices_dict = data.get("prices", {})
             district_prices = prices_dict.get(target_district)
 
@@ -425,20 +561,168 @@ class KrushiMitra(Agent):
             )
 
     @function_tool
-    async def create_escalation(self, reason: str, summary: str, urgency: str) -> str:
-        """Create an escalation ticket to a human agricultural specialist (KVK Officer).
+    async def get_commodity_mandi_prices(self, commodity: str, district: str) -> str:
+        """Fetch mandi (APMC) market prices for agricultural crops: cotton (कापूस), soybean (सोयाबीन), or tur (तूर डाळ)
+        in a specific district of Vidarbha (Yavatmal, Amravati, Akola, Wardha).
 
         Parameters:
-        - reason: The primary reason for escalation (e.g., 'Severe Pink Bollworm infestation', 'Pesticide brand recommendation request', 'Mandi price dispute').
-        - summary: A concise summary of the issue (Who, what happened, what was checked). DO NOT include private passwords, PINs, or OTPs.
-        - urgency: The level of urgency ('HIGH' or 'MEDIUM').
-
-        Use this only when the farmer has explicitly agreed to escalate.
+        - commodity: Crop name such as 'cotton', 'soybean', or 'tur'.
+        - district: The district name (e.g., 'Yavatmal', 'Amravati', 'Akola', 'Wardha').
         """
-        try:
-            from database import create_escalation
+        cleaned_district = district.strip().lower()
+        target_district = None
+        for key in ["Yavatmal", "Amravati", "Akola", "Wardha"]:
+            if key.lower() == cleaned_district:
+                target_district = key
+                break
 
-            ticket_id = create_escalation(
+        if not target_district:
+            return (
+                "Error: Mandi price records are only available for Yavatmal, Amravati, Akola, and Wardha. "
+                "Please tell the farmer you only have prices for these locations."
+            )
+
+        cleaned_comm = commodity.strip().lower()
+        comm_key = "cotton"
+        if "soy" in cleaned_comm or "सोयाबीन" in cleaned_comm:
+            comm_key = "soybean"
+        elif "tur" in cleaned_comm or "तूर" in cleaned_comm or "arhar" in cleaned_comm:
+            comm_key = "tur"
+        elif (
+            "cotton" in cleaned_comm
+            or "कापूस" in cleaned_comm
+            or "kapas" in cleaned_comm
+        ):
+            comm_key = "cotton"
+
+        try:
+            data = _get_mandi_prices_data()
+            comm_dict = data.get("commodities", {}).get(comm_key, {})
+            districts_dict = comm_dict.get("districts", {})
+            district_prices = districts_dict.get(target_district)
+
+            if not district_prices and comm_key == "cotton":
+                district_prices = data.get("prices", {}).get(target_district)
+
+            if not district_prices:
+                return (
+                    f"Error: No {comm_key} price details found for {target_district}."
+                )
+
+            mandi_name = district_prices.get("mandi_name", f"{target_district} APMC")
+            min_price = district_prices["min_price"]
+            max_price = district_prices["max_price"]
+            modal_price = district_prices["modal_price"]
+            msp_ref = comm_dict.get("msp", district_prices.get("msp_reference", 6620))
+            name_mr = comm_dict.get("name_mr", comm_key)
+
+            self.tool_executed = True
+            return (
+                f"{name_mr.capitalize()} rates for {mandi_name} from yesterday's close:\n"
+                f"- Minimum price: {min_price} rupees per quintal\n"
+                f"- Maximum price: {max_price} rupees per quintal\n"
+                f"- Average modal price: {modal_price} rupees per quintal\n"
+                f"- Reference Government MSP: {msp_ref} rupees per quintal."
+            )
+        except Exception as e:
+            app_logger.error("Failed to load commodity mandi prices: %s", e)
+            self.error_log = f"Failed to load commodity mandi prices: {e}"
+            return (
+                "Error: Could not retrieve market prices due to a local server error."
+            )
+
+    @function_tool
+    async def get_weather_alerts(self, district: str) -> str:
+        """Check for severe weather alerts (unseasonal rain, thunderstorms, high winds, heatwaves) for a district in Vidarbha.
+
+        Parameters:
+        - district: The district name (e.g., 'Yavatmal', 'Amravati', 'Akola', 'Wardha').
+        """
+        import asyncio
+
+        import aiohttp
+
+        from cache import telemetry_cache
+
+        coords = {
+            "yavatmal": (20.389, 78.131),
+            "amravati": (20.932, 77.752),
+            "akola": (20.700, 77.008),
+            "wardha": (20.745, 78.602),
+        }
+
+        cleaned_district = district.strip().lower()
+        if cleaned_district not in coords:
+            lat, lon = coords["yavatmal"]
+            target_name = "Yavatmal (default)"
+            cache_key = "alert_yavatmal"
+        else:
+            lat, lon = coords[cleaned_district]
+            target_name = district.strip().capitalize()
+            cache_key = f"alert_{cleaned_district}"
+
+        cached = await telemetry_cache.get(cache_key)
+        if cached:
+            self.tool_executed = True
+            return cached
+
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            f"&daily=precipitation_probability_max,wind_speed_10m_max,temperature_2m_max"
+            f"&timezone=Asia%2FKolkata&forecast_days=1"
+        )
+
+        try:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(url, timeout=aiohttp.ClientTimeout(total=5.0)) as response,
+            ):
+                if response.status != 200:
+                    return f"Error: Could not retrieve weather alert data (status {response.status})."
+
+                data = await response.json()
+                daily = data.get("daily", {})
+                rain_prob = daily.get("precipitation_probability_max", [0])[0] or 0
+                max_wind = daily.get("wind_speed_10m_max", [0])[0] or 0
+                max_temp = daily.get("temperature_2m_max", [30])[0] or 30
+
+                alerts = []
+                if rain_prob >= 70:
+                    alerts.append(
+                        f"Heavy unseasonal rainfall alert ({rain_prob}% probability). Secure picked cotton in dry storage immediately."
+                    )
+                if max_wind >= 35:
+                    alerts.append(
+                        f"High wind warning ({max_wind} km/h). Delay foliar pesticide spraying to prevent drift."
+                    )
+                if max_temp >= 42:
+                    alerts.append(
+                        f"Severe heatwave advisory ({max_temp}°C). Irrigate early morning to prevent boll shedding."
+                    )
+
+                if not alerts:
+                    res = f"Weather Alert Status for {target_name}: No severe weather warnings active today. Normal agricultural operations safe."
+                else:
+                    res = f"URGENT Weather Alert for {target_name}:\n" + "\n".join(
+                        f"- {a}" for a in alerts
+                    )
+
+                await telemetry_cache.set(cache_key, res)
+                self.tool_executed = True
+                return res
+        except asyncio.TimeoutError:
+            return "Error: Weather alert service timed out. Please proceed with standard precautions."
+        except Exception as e:
+            return f"Error: Unable to fetch weather alerts due to technical error: {e}"
+
+    @function_tool
+    async def create_escalation(self, reason: str, summary: str, urgency: str) -> str:
+        """Create an escalation ticket to a human agricultural specialist (KVK Officer)."""
+        try:
+            from database import async_create_escalation
+
+            ticket_id = await async_create_escalation(
                 user_id=self.user_id,
                 reason=reason,
                 summary=summary,
@@ -625,7 +909,7 @@ class CottonPestSpecialist(Agent):
         This queries the database of government-approved agricultural advisories.
         """
         app_logger.info(f"RAG: Querying verified advisory for pest: {pest_name}")
-        advisory = query_pest_advisory(pest_name)
+        advisory = await query_pest_advisory_async(pest_name)
         if advisory:
             app_logger.info(f"RAG: Found matching advisory for pest: {pest_name}")
             return (
@@ -737,7 +1021,9 @@ server = AgentServer()
 
 def prewarm(proc: JobProcess):
     """Pre-warm the VAD model before first call."""
-    proc.userdata["vad"] = silero.VAD.load()
+    proc.userdata["vad"] = silero.VAD.load(
+        activation_threshold=0.6, min_speech_duration=0.1
+    )
 
 
 server.setup_fnc = prewarm
@@ -772,12 +1058,12 @@ async def krushi_mitra_session(ctx: JobContext):
     app_logger.info("Caller identified: %s", phone_number)
 
     # 2. Query database for profile and last call history
-    from database import get_farmer, get_last_call_summary, init_db
+    from database import async_get_farmer, async_get_last_call_summary, init_db
 
     init_db()
 
-    profile = get_farmer(phone_number)
-    last_summary = get_last_call_summary(phone_number)
+    profile = await async_get_farmer(phone_number)
+    last_summary = await async_get_last_call_summary(phone_number)
 
     # 3. Instantiate KrushiMitra agent with contextual data
     agent_instance = KrushiMitra(
@@ -786,8 +1072,8 @@ async def krushi_mitra_session(ctx: JobContext):
 
     # 4. Set up voice pipeline session
     session = AgentSession(
-        # STT: Deepgram Nova-3 — supports Marathi and Hindi in multilingual mode
-        stt=deepgram.STT(model="nova-3", language="multi"),
+        # STT: Dynamic provider selection (Deepgram Nova-3 or OpenAI Whisper)
+        stt=get_stt_provider(),
         # LLM: Groq via OpenAI-compatible API
         # Groq base_url points to api.groq.com, model = llama-3.3-70b-versatile
         llm=lk_openai.LLM(
@@ -800,11 +1086,13 @@ async def krushi_mitra_session(ctx: JobContext):
             voice=MURF_VOICE_ID,
             style="Conversational",
             model=MURF_MODEL,
-            tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
+            tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=1),
             text_pacing=True,
         ),
         # Turn detection: Multilingual model handles Marathi/Hindi code-switching
-        turn_detection=MultilingualModel(),
+        turn_detection=MultilingualModel(
+            min_endpointing_delay=0.30, max_endpointing_delay=1.5
+        ),
         vad=ctx.proc.userdata["vad"],
         # Preemptive generation reduces perceived latency
         preemptive_generation=True,

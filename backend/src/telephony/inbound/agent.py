@@ -10,6 +10,7 @@ Run it with:
 See src/telephony/README.md for the trunk and dispatch rule setup.
 """
 
+import json
 import logging
 import os
 
@@ -27,25 +28,47 @@ from livekit.agents import (
     room_io,
     tokenize,
 )
-from livekit.plugins import deepgram, google, murf, noise_cancellation, silero
+from livekit.plugins import murf, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
-from prompts import MARKET_SPECIALIST_PROMPT, PEST_SPECIALIST_PROMPT
-from rag_utility import query_pest_advisory
+from prompts import (
+    MARKET_SPECIALIST_PROMPT,
+    PEST_SPECIALIST_PROMPT,
+    SYSTEM_PROMPT,
+)
+from rag_utility import query_pest_advisory_async
 
 logger = logging.getLogger("inbound-agent")
 
 load_dotenv(".env.local")
 
 # Optional — a phone number to transfer callers to when they ask for a human.
-# Leave unset and the transfer tool politely declines instead.
 TRANSFER_TO_NUMBER = os.getenv("TRANSFER_TO_NUMBER")
 
-# Change this prompt to change what your phone agent does.
-SYSTEM_PROMPT = """You are a friendly receptionist answering calls for a small business. Help callers with questions about hours, services, and locations, and take messages when needed. You are speaking on a phone call, so keep responses short and conversational — no formatting, emojis, or symbols. If the caller asks for a human, use the transfer_to_human tool. When the conversation is finished and the caller says goodbye, use the end_call tool."""
+MURF_VOICE_ID = os.getenv("MURF_VOICE_ID", "mr-IN-shilpa")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GREETING = "Namaskar! Mee Krushi Mitra — Vidarbhyatil kapas shetkaryasathi. Aaj tumhala kaay madat karaychi ahe?"
 
-# The first thing the caller hears when they pick up.
-GREETING = "Thanks for calling! How can I help you today?"
+# In-memory cache for static mandi prices dataset
+_MANDI_PRICES_CACHE: dict | None = None
+
+
+def _get_mandi_prices_data() -> dict:
+    global _MANDI_PRICES_CACHE
+    if _MANDI_PRICES_CACHE is None:
+        mandi_file = os.path.join(
+            os.path.dirname(__file__), "..", "..", "mandi_prices.json"
+        )
+        if os.path.exists(mandi_file):
+            try:
+                with open(mandi_file, encoding="utf-8") as f:
+                    _MANDI_PRICES_CACHE = json.load(f)
+            except Exception as e:
+                logger.error("Failed to load mandi_prices.json: %s", e)
+                _MANDI_PRICES_CACHE = {}
+        else:
+            _MANDI_PRICES_CACHE = {}
+    return _MANDI_PRICES_CACHE
 
 
 class InboundAgent(Agent):
@@ -53,18 +76,55 @@ class InboundAgent(Agent):
         self,
         ctx: JobContext,
         caller_identity: str | None,
+        profile: dict | None = None,
+        last_summary: str | None = None,
         start_time: float | None = None,
     ) -> None:
         self.ctx = ctx
         self.caller_identity = caller_identity
         self.user_id = caller_identity or "anonymous-phone"
-        self.profile = {}
+        self.profile = profile or {}
+        self.last_summary = last_summary
         self.start_time = start_time
         self._lk_session = None
         self._lk_ctx = ctx
         self.tool_executed = False
         self.error_log = None
-        super().__init__(instructions=SYSTEM_PROMPT)
+
+        instructions = SYSTEM_PROMPT
+
+        profile_context = []
+        if self.profile.get("name"):
+            profile_context.append(f"Name: {self.profile['name']}")
+
+        facts = self.profile.get("facts", {})
+        if facts.get("crops_grown"):
+            profile_context.append(f"Crops grown: {facts['crops_grown']}")
+        if facts.get("land_size_acres"):
+            profile_context.append(f"Land size: {facts['land_size_acres']} acres")
+        if facts.get("district"):
+            profile_context.append(f"District: {facts['district']}")
+        if facts.get("irrigation_type"):
+            profile_context.append(f"Irrigation type: {facts['irrigation_type']}")
+
+        if profile_context:
+            context_str = "\n".join(profile_context)
+            instructions = f"[FARMER PROFILE]\n{context_str}\n\n{instructions}"
+
+        if self.last_summary:
+            instructions = f"[LAST CALL SUMMARY]\n{self.last_summary}\n\n{instructions}"
+
+        if self.profile.get("name"):
+            name = self.profile["name"]
+            returning_instruction = (
+                f"[RETURNING USER]\n"
+                f"You are talking to a returning user named {name}. "
+                f'Greet them warmly by name in Marathi: "Namaskar {name} bhau, Krushi Mitra var tumche punha swagat ahe!" '
+                f"If a last call summary is present under [LAST CALL SUMMARY], follow up or reference it.\n\n"
+            )
+            instructions = returning_instruction + instructions
+
+        super().__init__(instructions=instructions)
 
     @function_tool
     async def transfer_to_human(self, context: RunContext) -> str:
@@ -113,6 +173,577 @@ class InboundAgent(Agent):
             api.DeleteRoomRequest(room=self.ctx.room.name)
         )
         return "Call ended."
+
+    @function_tool
+    async def save_farmer_profile(
+        self,
+        name: str,
+        district: str,
+        land_size_acres: float,
+        crops_grown: str,
+        irrigation_type: str,
+        consent_given: bool = False,
+    ) -> str:
+        """Save or update the farmer's profile in the database.
+
+        Parameters:
+        - name: The farmer's full name.
+        - district: The district in Vidarbha (Yavatmal, Amravati, Akola, Wardha).
+        - land_size_acres: Size of their farm in acres (e.g., 5.0).
+        - crops_grown: Primary crops (e.g., 'cotton', 'soybean').
+        - irrigation_type: 'rainfed' (koradvahu) or 'irrigated' (bagayati).
+        - consent_given: True if the farmer explicitly gave verbal consent.
+        """
+        if not consent_given:
+            return "Consent not given. Do not save profile data."
+
+        facts = {
+            "crops_grown": crops_grown,
+            "district": district,
+            "land_size_acres": land_size_acres,
+            "irrigation_type": irrigation_type,
+        }
+
+        try:
+            from database import async_save_farmer
+
+            await async_save_farmer(
+                user_id=self.user_id,
+                name=name,
+                language_preference="mr",
+                facts=facts,
+            )
+            self.profile = {"name": name, "facts": facts}
+            self.tool_executed = True
+            logger.info("Saved farmer profile for user: %s", self.user_id)
+            return f"Profile successfully saved for {name}."
+        except Exception as e:
+            logger.error("Failed to save farmer profile: %s", e)
+            self.error_log = f"Failed to save profile: {e}"
+            return "Failed to save profile."
+
+    @function_tool
+    async def escalate_to_human(
+        self,
+        farmer_name: str,
+        issue_summary: str,
+        crop_stage: str,
+        urgency: str,
+        verbal_consent_given: bool = False,
+    ) -> str:
+        """Submit a formal ticket to connect the farmer with a human agricultural officer (KVK Specialist).
+
+        Parameters:
+        - farmer_name: Name of the farmer.
+        - issue_summary: Factual summary of the issue.
+        - crop_stage: Current stage of the cotton crop.
+        - urgency: 'HIGH' or 'MEDIUM'.
+        - verbal_consent_given: True ONLY if farmer explicitly agreed.
+        """
+        if not verbal_consent_given:
+            return (
+                "Consent not granted. Do not escalate to agricultural officer. "
+                "Inform the farmer you respect their decision and continue regular advice."
+            )
+
+        try:
+            from database import async_create_escalation
+
+            full_summary = (
+                f"Farmer: {farmer_name} | Stage: {crop_stage} | Issue: {issue_summary}"
+            )
+            ticket_id = await async_create_escalation(
+                user_id=self.user_id,
+                reason="Severe crop damage / specialist request",
+                summary=full_summary,
+                urgency=urgency,
+            )
+            self.tool_executed = True
+            logger.info("Escalation created #%s for user %s", ticket_id, self.user_id)
+            return (
+                f"Escalation ticket #{ticket_id} created with {urgency} priority. "
+                f"Inform the farmer in Marathi that their complaint is submitted to the KVK officer."
+            )
+        except Exception as e:
+            logger.error("Failed to create escalation ticket: %s", e)
+            self.error_log = f"Escalation failed: {e}"
+            return "Failed to submit escalation ticket."
+
+    @function_tool
+    async def get_weather_forecast(self, district: str) -> str:
+        """Fetch the live 3-day weather forecast for a specific district in Vidarbha (Yavatmal, Amravati, Akola, Wardha).
+
+        Parameters:
+        - district: The district name (e.g., 'Yavatmal', 'Amravati', 'Akola', 'Wardha').
+        """
+        import asyncio
+
+        import aiohttp
+
+        coords = {
+            "yavatmal": (20.389, 78.131),
+            "amravati": (20.932, 77.752),
+            "akola": (20.700, 77.008),
+            "wardha": (20.745, 78.602),
+        }
+
+        cleaned_district = district.strip().lower()
+        if cleaned_district not in coords:
+            logger.warning(
+                "Unrecognized district requested: %s. Defaulting to Yavatmal.",
+                district,
+            )
+            lat, lon = coords["yavatmal"]
+            target_name = "Yavatmal (default)"
+        else:
+            lat, lon = coords[cleaned_district]
+            target_name = district.strip().capitalize()
+
+        from cache import telemetry_cache
+
+        cache_key = (
+            f"weather_{cleaned_district if cleaned_district in coords else 'yavatmal'}"
+        )
+        cached = await telemetry_cache.get(cache_key)
+        if cached:
+            self.tool_executed = True
+            return cached
+
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+            f"&timezone=Asia%2FKolkata&forecast_days=3"
+        )
+
+        try:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(url, timeout=aiohttp.ClientTimeout(total=5.0)) as response,
+            ):
+                if response.status != 200:
+                    return f"Error: Could not retrieve weather data. API responded with status {response.status}."
+
+                data = await response.json()
+                daily = data.get("daily", {})
+                if not daily or "time" not in daily:
+                    return "Error: Weather data formatting was unrecognized."
+
+                forecasts = []
+                for i in range(len(daily["time"])):
+                    date = daily["time"][i]
+                    rain_prob = daily["precipitation_probability_max"][i]
+                    temp_max = daily["temperature_2m_max"][i]
+                    temp_min = daily["temperature_2m_min"][i]
+                    forecasts.append(
+                        f"Date: {date}, Rain Probability: {rain_prob}%, "
+                        f"Temp: {temp_min} to {temp_max} degrees Celsius"
+                    )
+
+                forecast_str = "\n".join(forecasts)
+                self.tool_executed = True
+                result_msg = f"Live 3-day weather forecast for {target_name} (retrieved today):\n{forecast_str}"
+                await telemetry_cache.set(cache_key, result_msg)
+                return result_msg
+
+        except asyncio.TimeoutError:
+            logger.error("Weather API call timed out.")
+            self.error_log = "Weather API call timed out"
+            return "Error: The live weather service timed out. Please tell the farmer that the weather system is temporarily busy, and recommend checking rain signs manually."
+        except Exception as e:
+            logger.error("Weather API failed with exception: %s", e)
+            self.error_log = f"Weather API failed with exception: {e}"
+            return "Error: Failed to connect to the weather service due to a technical error."
+
+    @function_tool
+    async def get_soil_and_irrigation_advisory(self, district: str) -> str:
+        """Fetch live soil moisture (0-3cm) and daily evapotranspiration (ET0) for a specific district
+        in Vidarbha (Yavatmal, Amravati, Akola, Wardha) to provide scientific irrigation advice for cotton crops.
+
+        Parameters:
+        - district: The district name (e.g., 'Yavatmal', 'Amravati', 'Akola', 'Wardha').
+        """
+        import asyncio
+
+        import aiohttp
+
+        coords = {
+            "yavatmal": (20.389, 78.131),
+            "amravati": (20.932, 77.752),
+            "akola": (20.700, 77.008),
+            "wardha": (20.745, 78.602),
+        }
+
+        cleaned_district = district.strip().lower()
+        if cleaned_district not in coords:
+            logger.warning(
+                "Unrecognized district requested for soil data: %s. Defaulting to Yavatmal.",
+                district,
+            )
+            lat, lon = coords["yavatmal"]
+            target_name = "Yavatmal (default)"
+        else:
+            lat, lon = coords[cleaned_district]
+            target_name = district.strip().capitalize()
+
+        from cache import telemetry_cache
+
+        cache_key = (
+            f"soil_{cleaned_district if cleaned_district in coords else 'yavatmal'}"
+        )
+        cached = await telemetry_cache.get(cache_key)
+        if cached:
+            self.tool_executed = True
+            return cached
+
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            f"&hourly=soil_moisture_0_to_1cm"
+            f"&daily=et0_fao_evapotranspiration"
+            f"&timezone=Asia%2FKolkata&forecast_days=1"
+        )
+
+        try:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(url, timeout=aiohttp.ClientTimeout(total=5.0)) as response,
+            ):
+                if response.status != 200:
+                    return f"Error: Could not retrieve soil data. API responded with status {response.status}."
+
+                data = await response.json()
+                hourly = data.get("hourly", {})
+                daily = data.get("daily", {})
+
+                moisture_readings = hourly.get("soil_moisture_0_to_1cm", [])
+                et0_readings = daily.get("et0_fao_evapotranspiration", [])
+
+                valid_moisture = [
+                    m for m in moisture_readings if isinstance(m, (int, float))
+                ]
+                if not valid_moisture:
+                    return "Error: Soil moisture data was unavailable."
+
+                avg_moisture = sum(valid_moisture) / len(valid_moisture)
+                moisture_pct = round(avg_moisture * 100, 1)
+                valid_et0 = [e for e in et0_readings if isinstance(e, (int, float))]
+                et0_val = valid_et0[0] if valid_et0 else 3.5
+
+                if moisture_pct < 15.0:
+                    status = "Water Deficit / Dry"
+                    advice = (
+                        "Soil moisture is critically low. If your cotton crop is in flowering or boll development stage, "
+                        "provide light drip irrigation in the morning or evening to prevent flower and boll drop."
+                    )
+                elif moisture_pct <= 32.0:
+                    status = "Adequate / Optimal"
+                    advice = (
+                        "Soil root zone has sufficient moisture. No urgent irrigation is needed today. "
+                        "Rainfed crops are healthy."
+                    )
+                else:
+                    status = "High Moisture / Saturated"
+                    advice = (
+                        "Soil has excessive moisture. Ensure drainage channels are clear to prevent waterlogging, "
+                        "root rot, or fungal wilt."
+                    )
+
+                self.tool_executed = True
+                result_msg = (
+                    f"Live Soil & Irrigation telemetry for {target_name}:\n"
+                    f"- Topsoil Moisture: {moisture_pct}% (m3/m3 equivalent: {round(avg_moisture, 3)})\n"
+                    f"- Moisture Status: {status}\n"
+                    f"- Daily Evapotranspiration Loss (ET0): {et0_val} mm/day\n"
+                    f"- Agronomic Advice: {advice}"
+                )
+                await telemetry_cache.set(cache_key, result_msg)
+                return result_msg
+
+        except asyncio.TimeoutError:
+            logger.error("Soil moisture API call timed out.")
+            self.error_log = "Soil API timed out"
+            return "Error: The soil moisture sensor service timed out. Recommend manually checking root zone moisture by digging 2 inches."
+        except Exception as e:
+            logger.error("Soil API failed: %s", e)
+            self.error_log = f"Soil API failed: {e}"
+            return "Error: Failed to fetch live soil data due to a network error."
+
+    @function_tool
+    async def get_cotton_mandi_prices(self, district: str) -> str:
+        """Fetch the cotton mandi (APMC) market prices for a specific district in Vidarbha (Yavatmal, Amravati, Akola, Wardha)."""
+        cleaned_district = district.strip().lower()
+        target_district = None
+        for key in ["Yavatmal", "Amravati", "Akola", "Wardha"]:
+            if key.lower() == cleaned_district:
+                target_district = key
+                break
+
+        if not target_district:
+            return (
+                "Error: Cotton price records are only available for Yavatmal, Amravati, Akola, and Wardha. "
+                "Please tell the farmer you only have prices for these locations."
+            )
+
+        try:
+            data = _get_mandi_prices_data()
+            prices_dict = data.get("prices", {})
+            district_prices = prices_dict.get(target_district)
+
+            if not district_prices:
+                return f"Error: No price details found for {target_district}."
+
+            mandi_name = district_prices["mandi_name"]
+            min_price = district_prices["min_price"]
+            max_price = district_prices["max_price"]
+            modal_price = district_prices["modal_price"]
+            msp_ref = district_prices["msp_reference"]
+
+            self.tool_executed = True
+            return (
+                f"Cotton rates for {mandi_name} from yesterday's close (August 16, 2026):\n"
+                f"- Minimum price: {min_price} rupees per quintal\n"
+                f"- Maximum price: {max_price} rupees per quintal\n"
+                f"- Average modal price: {modal_price} rupees per quintal\n"
+                f"- Reference Government MSP: {msp_ref} rupees per quintal."
+            )
+        except Exception as e:
+            logger.error("Failed to load cotton mandi prices: %s", e)
+            self.error_log = f"Failed to load cotton mandi prices: {e}"
+            return (
+                "Error: Could not retrieve market prices due to a local server error."
+            )
+
+    async def on_session_end(self) -> None:
+        """Save call summary to SQLite when inbound call ends."""
+        import time
+
+        duration = 0
+        if self.start_time:
+            duration = int(time.time() - self.start_time)
+
+        outcome = "FAILURE"
+        error_msg = None
+
+        if self.error_log:
+            outcome = "FAILURE"
+            error_msg = self.error_log
+        elif self.tool_executed and duration >= 10:
+            outcome = "SUCCESS"
+        else:
+            outcome = "FAILURE"
+            if duration < 10:
+                error_msg = "Call ended too early (short duration)"
+            else:
+                error_msg = "No advisory action / tool executed during the call"
+
+        if self._lk_session and self._lk_ctx:
+            messages = list(self._lk_session.history.messages)
+            has_dialogue = any(m.role in ("user", "assistant") for m in messages)
+            if has_dialogue:
+                try:
+                    dialogue = []
+                    for m in messages:
+                        if m.role in ("user", "assistant"):
+                            content = m.content
+                            if isinstance(content, list):
+                                content = " ".join(str(c) for c in content)
+                            dialogue.append(f"{m.role.upper()}: {content}")
+
+                    dialogue_text = "\n".join(dialogue)
+                    llm = self._lk_session.llm
+                    from livekit.agents.llm.chat_context import ChatContext
+
+                    summary_prompt = (
+                        "You are Krushi Mitra's internal summarizer. "
+                        "Summarize this inbound farmer query call in Marathi. "
+                        "Make it 1 to 2 sentences. Focus on what was asked and what advisory was provided. "
+                        "Do not include greeting or conversational filler. Keep it strictly factual.\n\n"
+                        f"Conversation:\n{dialogue_text}"
+                    )
+
+                    ctx = ChatContext()
+                    ctx.add_message(role="user", content=summary_prompt)
+
+                    response = await llm.chat(chat_ctx=ctx).collect()
+                    summary_text = response.text.strip()
+
+                    if summary_text:
+                        from database import async_save_call_summary
+
+                        await async_save_call_summary(
+                            self.user_id,
+                            summary_text,
+                            duration_seconds=duration,
+                            outcome=outcome,
+                            error_log=error_msg,
+                            call_type="INBOUND",
+                        )
+                        logger.info(
+                            "Saved inbound call summary for %s: %s",
+                            self.user_id,
+                            summary_text,
+                        )
+                except Exception as e:
+                    logger.error(
+                        "Failed to generate and save inbound call summary: %s", e
+                    )
+
+    @function_tool
+    async def get_commodity_mandi_prices(self, commodity: str, district: str) -> str:
+        """Fetch mandi (APMC) market prices for agricultural crops: cotton (कापूस), soybean (सोयाबीन), or tur (तूर डाळ)
+        in a specific district of Vidarbha (Yavatmal, Amravati, Akola, Wardha).
+
+        Parameters:
+        - commodity: Crop name such as 'cotton', 'soybean', or 'tur'.
+        - district: The district name (e.g., 'Yavatmal', 'Amravati', 'Akola', 'Wardha').
+        """
+        cleaned_district = district.strip().lower()
+        target_district = None
+        for key in ["Yavatmal", "Amravati", "Akola", "Wardha"]:
+            if key.lower() == cleaned_district:
+                target_district = key
+                break
+
+        if not target_district:
+            return (
+                "Error: Mandi price records are only available for Yavatmal, Amravati, Akola, and Wardha. "
+                "Please tell the farmer you only have prices for these locations."
+            )
+
+        cleaned_comm = commodity.strip().lower()
+        comm_key = "cotton"
+        if "soy" in cleaned_comm or "सोयाबीन" in cleaned_comm:
+            comm_key = "soybean"
+        elif "tur" in cleaned_comm or "तूर" in cleaned_comm or "arhar" in cleaned_comm:
+            comm_key = "tur"
+        elif (
+            "cotton" in cleaned_comm
+            or "कापूस" in cleaned_comm
+            or "kapas" in cleaned_comm
+        ):
+            comm_key = "cotton"
+
+        try:
+            data = _get_mandi_prices_data()
+            comm_dict = data.get("commodities", {}).get(comm_key, {})
+            districts_dict = comm_dict.get("districts", {})
+            district_prices = districts_dict.get(target_district)
+
+            if not district_prices and comm_key == "cotton":
+                district_prices = data.get("prices", {}).get(target_district)
+
+            if not district_prices:
+                return (
+                    f"Error: No {comm_key} price details found for {target_district}."
+                )
+
+            mandi_name = district_prices.get("mandi_name", f"{target_district} APMC")
+            min_price = district_prices["min_price"]
+            max_price = district_prices["max_price"]
+            modal_price = district_prices["modal_price"]
+            msp_ref = comm_dict.get("msp", district_prices.get("msp_reference", 6620))
+            name_mr = comm_dict.get("name_mr", comm_key)
+
+            self.tool_executed = True
+            return (
+                f"{name_mr.capitalize()} rates for {mandi_name} from yesterday's close:\n"
+                f"- Minimum price: {min_price} rupees per quintal\n"
+                f"- Maximum price: {max_price} rupees per quintal\n"
+                f"- Average modal price: {modal_price} rupees per quintal\n"
+                f"- Reference Government MSP: {msp_ref} rupees per quintal."
+            )
+        except Exception as e:
+            logger.error("Failed to load commodity mandi prices: %s", e)
+            self.error_log = f"Failed to load commodity mandi prices: {e}"
+            return (
+                "Error: Could not retrieve market prices due to a local server error."
+            )
+
+    @function_tool
+    async def get_weather_alerts(self, district: str) -> str:
+        """Check for severe weather alerts (unseasonal rain, thunderstorms, high winds, heatwaves) for a district in Vidarbha.
+
+        Parameters:
+        - district: The district name (e.g., 'Yavatmal', 'Amravati', 'Akola', 'Wardha').
+        """
+        import asyncio
+
+        import aiohttp
+
+        from cache import telemetry_cache
+
+        coords = {
+            "yavatmal": (20.389, 78.131),
+            "amravati": (20.932, 77.752),
+            "akola": (20.700, 77.008),
+            "wardha": (20.745, 78.602),
+        }
+
+        cleaned_district = district.strip().lower()
+        if cleaned_district not in coords:
+            lat, lon = coords["yavatmal"]
+            target_name = "Yavatmal (default)"
+            cache_key = "alert_yavatmal"
+        else:
+            lat, lon = coords[cleaned_district]
+            target_name = district.strip().capitalize()
+            cache_key = f"alert_{cleaned_district}"
+
+        cached = await telemetry_cache.get(cache_key)
+        if cached:
+            self.tool_executed = True
+            return cached
+
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            f"&daily=precipitation_probability_max,wind_speed_10m_max,temperature_2m_max"
+            f"&timezone=Asia%2FKolkata&forecast_days=1"
+        )
+
+        try:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(url, timeout=aiohttp.ClientTimeout(total=5.0)) as response,
+            ):
+                if response.status != 200:
+                    return f"Error: Could not retrieve weather alert data (status {response.status})."
+
+                data = await response.json()
+                daily = data.get("daily", {})
+                rain_prob = daily.get("precipitation_probability_max", [0])[0] or 0
+                max_wind = daily.get("wind_speed_10m_max", [0])[0] or 0
+                max_temp = daily.get("temperature_2m_max", [30])[0] or 30
+
+                alerts = []
+                if rain_prob >= 70:
+                    alerts.append(
+                        f"Heavy unseasonal rainfall alert ({rain_prob}% probability). Secure picked cotton in dry storage immediately."
+                    )
+                if max_wind >= 35:
+                    alerts.append(
+                        f"High wind warning ({max_wind} km/h). Delay foliar pesticide spraying to prevent drift."
+                    )
+                if max_temp >= 42:
+                    alerts.append(
+                        f"Severe heatwave advisory ({max_temp}°C). Irrigate early morning to prevent boll shedding."
+                    )
+
+                if not alerts:
+                    res = f"Weather Alert Status for {target_name}: No severe weather warnings active today. Normal agricultural operations safe."
+                else:
+                    res = f"URGENT Weather Alert for {target_name}:\n" + "\n".join(
+                        f"- {a}" for a in alerts
+                    )
+
+                await telemetry_cache.set(cache_key, res)
+                self.tool_executed = True
+                return res
+        except asyncio.TimeoutError:
+            return "Error: Weather alert service timed out. Please proceed with standard precautions."
+        except Exception as e:
+            return f"Error: Unable to fetch weather alerts due to technical error: {e}"
 
     @function_tool
     async def handoff_to_pest_specialist(self) -> str:
@@ -278,7 +909,7 @@ class CottonPestSpecialist(Agent):
         This queries the database of government-approved agricultural advisories.
         """
         logger.info(f"RAG: Inbound querying verified advisory for pest: {pest_name}")
-        advisory = query_pest_advisory(pest_name)
+        advisory = await query_pest_advisory_async(pest_name)
         if advisory:
             logger.info(f"RAG: Found matching advisory for pest: {pest_name}")
             return (
@@ -391,7 +1022,9 @@ server = AgentServer()
 
 
 def prewarm(proc: JobProcess):
-    proc.userdata["vad"] = silero.VAD.load()
+    proc.userdata["vad"] = silero.VAD.load(
+        activation_threshold=0.6, min_speech_duration=0.1
+    )
 
 
 server.setup_fnc = prewarm
@@ -419,30 +1052,62 @@ async def inbound_agent(ctx: JobContext):
     participant = await ctx.wait_for_participant()
 
     phone_number = caller_phone_number(participant)
+    user_id = phone_number or participant.identity
     logger.info(
         "inbound call answered",
         extra={"caller": phone_number or "unknown", "identity": participant.identity},
     )
 
-    # Same voice pipeline as src/agent.py — see that file for the annotated version.
+    from database import async_get_farmer, async_get_last_call_summary, init_db
+
+    init_db()
+
+    profile = await async_get_farmer(user_id)
+    last_summary = None
+    if profile:
+        last_summary = await async_get_last_call_summary(user_id)
+
+    import time
+
+    start_time = time.time()
+
+    from livekit.plugins import openai as lk_openai
+
+    from agent import get_stt_provider
+
     session = AgentSession(
-        stt=deepgram.STT(model="nova-3"),
-        llm=google.LLM(
-            model="gemini-2.5-flash",
+        stt=get_stt_provider(),
+        llm=lk_openai.LLM(
+            model=GROQ_MODEL,
+            base_url="https://api.groq.com/openai/v1",
+            api_key=os.getenv("GROQ_API_KEY"),
         ),
         tts=murf.TTS(
-            voice="en-US-matthew",
-            style="Conversation",
-            tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
+            voice=MURF_VOICE_ID,
+            style="Conversational",
+            model="GEN2",
+            tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=1),
             text_pacing=True,
         ),
-        turn_detection=MultilingualModel(),
+        turn_detection=MultilingualModel(
+            min_endpointing_delay=0.30, max_endpointing_delay=1.5
+        ),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
     )
 
+    agent_instance = InboundAgent(
+        ctx=ctx,
+        caller_identity=user_id,
+        profile=profile,
+        last_summary=last_summary,
+        start_time=start_time,
+    )
+    agent_instance._lk_session = session
+    agent_instance._lk_ctx = ctx
+
     await session.start(
-        agent=InboundAgent(ctx, participant.identity),
+        agent=agent_instance,
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
@@ -457,8 +1122,20 @@ async def inbound_agent(ctx: JobContext):
         ),
     )
 
-    # Speak first — the caller dialled you, so they expect to be greeted.
-    await session.say(GREETING, allow_interruptions=True)
+    # Speak first — personalizing greeting if caller profile is known
+    if profile and profile.get("name"):
+        name = profile["name"]
+        greeting = f"Namaskar {name} bhau, Krushi Mitra var tumche punha swagat ahe!"
+        if last_summary:
+            greeting += (
+                " Maagchya veles aapan kelelya चर्चेबद्दल, aaj tumhala kaay madat pahije?"
+            )
+        else:
+            greeting += " Aaj tumhala kaay madat karaychi ahe?"
+    else:
+        greeting = GREETING
+
+    await session.say(greeting, allow_interruptions=True)
 
 
 if __name__ == "__main__":

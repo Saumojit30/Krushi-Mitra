@@ -1,5 +1,97 @@
 {
   "last_updated": "2026-08-16T18:00:00Z",
+  "commodities": {
+    "cotton": {
+      "name_mr": "कापूस",
+      "msp": 6620,
+      "districts": {
+        "Yavatmal": {
+          "mandi_name": "Yavatmal APMC",
+          "min_price": 6800,
+          "max_price": 7350,
+          "modal_price": 7100
+        },
+        "Amravati": {
+          "mandi_name": "Amravati APMC",
+          "min_price": 6750,
+          "max_price": 7280,
+          "modal_price": 7050
+        },
+        "Akola": {
+          "mandi_name": "Akola APMC",
+          "min_price": 6900,
+          "max_price": 7400,
+          "modal_price": 7200
+        },
+        "Wardha": {
+          "mandi_name": "Wardha APMC",
+          "min_price": 6700,
+          "max_price": 7250,
+          "modal_price": 7000
+        }
+      }
+    },
+    "soybean": {
+      "name_mr": "सोयाबीन",
+      "msp": 4892,
+      "districts": {
+        "Yavatmal": {
+          "mandi_name": "Yavatmal APMC",
+          "min_price": 4500,
+          "max_price": 4950,
+          "modal_price": 4750
+        },
+        "Amravati": {
+          "mandi_name": "Amravati APMC",
+          "min_price": 4550,
+          "max_price": 5000,
+          "modal_price": 4800
+        },
+        "Akola": {
+          "mandi_name": "Akola APMC",
+          "min_price": 4600,
+          "max_price": 5050,
+          "modal_price": 4850
+        },
+        "Wardha": {
+          "mandi_name": "Wardha APMC",
+          "min_price": 4500,
+          "max_price": 4920,
+          "modal_price": 4720
+        }
+      }
+    },
+    "tur": {
+      "name_mr": "तूर डाळ",
+      "msp": 7550,
+      "districts": {
+        "Yavatmal": {
+          "mandi_name": "Yavatmal APMC",
+          "min_price": 9500,
+          "max_price": 10800,
+          "modal_price": 10200
+        },
+        "Amravati": {
+          "mandi_name": "Amravati APMC",
+          "min_price": 9600,
+          "max_price": 10900,
+          "modal_price": 10300
+        },
+        "Akola": {
+          "mandi_name": "Akola APMC",
+          "min_price": 9700,
+          "max_price": 11000,
+          "modal_price": 10400
+        },
+        "Wardha": {
+          "mandi_name": "Wardha APMC",
+          "min_price": 9550,
+          "max_price": 10750,
+          "modal_price": 10150
+        }
+      }
+    }
+  },
   "prices": {
     "Yavatmal": {
       "mandi_name": "Yavatmal APMC",

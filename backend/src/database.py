@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import sqlite3
@@ -354,3 +355,47 @@ def create_escalation(user_id: str, reason: str, summary: str, urgency: str) -> 
     conn.commit()
     conn.close()
     return ticket_id
+
+
+async def async_get_farmer(user_id: str):
+    return await asyncio.to_thread(get_farmer, user_id)
+
+
+async def async_save_farmer(
+    user_id: str,
+    name: Optional[str] = None,
+    language_preference: Optional[str] = None,
+    facts: Optional[dict] = None,
+):
+    return await asyncio.to_thread(
+        save_farmer, user_id, name, language_preference, facts
+    )
+
+
+async def async_save_call_summary(
+    user_id: str,
+    summary: str,
+    duration_seconds: int = 0,
+    outcome: str = "SUCCESS",
+    error_log: Optional[str] = None,
+    call_type: str = "INBOUND",
+):
+    return await asyncio.to_thread(
+        save_call_summary,
+        user_id,
+        summary,
+        duration_seconds,
+        outcome,
+        error_log,
+        call_type,
+    )
+
+
+async def async_get_last_call_summary(user_id: str):
+    return await asyncio.to_thread(get_last_call_summary, user_id)
+
+
+async def async_create_escalation(
+    user_id: str, reason: str, summary: str, urgency: str
+) -> int:
+    return await asyncio.to_thread(create_escalation, user_id, reason, summary, urgency)

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import urllib.parse
@@ -10,6 +11,24 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 LOCAL_ADVISORIES_PATH = os.path.join(os.path.dirname(__file__), "local_advisories.json")
+
+# In-memory cache for advisories dataset
+_LOCAL_ADVISORIES_CACHE: Optional[list[dict[str, Any]]] = None
+
+
+def _load_local_advisories() -> list[dict[str, Any]]:
+    global _LOCAL_ADVISORIES_CACHE
+    if _LOCAL_ADVISORIES_CACHE is None:
+        if os.path.exists(LOCAL_ADVISORIES_PATH):
+            try:
+                with open(LOCAL_ADVISORIES_PATH, encoding="utf-8") as f:
+                    _LOCAL_ADVISORIES_CACHE = json.load(f)
+            except Exception as e:
+                print(f"Error loading local_advisories.json: {e}")
+                _LOCAL_ADVISORIES_CACHE = []
+        else:
+            _LOCAL_ADVISORIES_CACHE = []
+    return _LOCAL_ADVISORIES_CACHE
 
 
 def get_gemini_embedding(text: str) -> Optional[list[float]]:
@@ -37,16 +56,15 @@ def get_gemini_embedding(text: str) -> Optional[list[float]]:
         return None
 
 
-def query_pest_advisory_local(query_text: str) -> Optional[dict[str, Any]]:
-    """Performs a local keyword-matching search against local_advisories.json."""
-    if not os.path.exists(LOCAL_ADVISORIES_PATH):
-        return None
+async def get_gemini_embedding_async(text: str) -> Optional[list[float]]:
+    """Non-blocking async wrapper around get_gemini_embedding."""
+    return await asyncio.to_thread(get_gemini_embedding, text)
 
-    try:
-        with open(LOCAL_ADVISORIES_PATH, encoding="utf-8") as f:
-            advisories = json.load(f)
-    except Exception as e:
-        print(f"Error loading local_advisories.json: {e}")
+
+def query_pest_advisory_local(query_text: str) -> Optional[dict[str, Any]]:
+    """Performs a local keyword-matching search against cached advisories."""
+    advisories = _load_local_advisories()
+    if not advisories:
         return None
 
     # Normalize user query
@@ -61,7 +79,6 @@ def query_pest_advisory_local(query_text: str) -> Optional[dict[str, Any]]:
 
         # 1. Check direct exact match
         if pest in query_lower:
-            # High priority direct match
             return adv
 
         # 2. Check word overlap score
@@ -72,7 +89,7 @@ def query_pest_advisory_local(query_text: str) -> Optional[dict[str, Any]]:
         text_words = set(adv.get("advisory_text", "").lower().split())
         text_overlap = len(query_words.intersection(text_words))
 
-        score = (overlap * 5) + text_overlap  # Heavy weight on matching the pest name
+        score = (overlap * 5) + text_overlap  # Heavy weight on matching pest name
 
         if score > max_score and score > 0:
             max_score = score
@@ -82,20 +99,11 @@ def query_pest_advisory_local(query_text: str) -> Optional[dict[str, Any]]:
 
 
 def query_pest_advisory(query_text: str) -> Optional[dict[str, Any]]:
-    """Queries the verified crop advisories database.
-    Performs vector similarity search if Supabase and Gemini are set up;
-    otherwise falls back to local keyword search.
-    """
+    """Queries verified crop advisories database (synchronous entrypoint)."""
     if SUPABASE_URL and SUPABASE_KEY and GOOGLE_API_KEY:
         try:
-            # 1. Generate Query Embedding
             embedding = get_gemini_embedding(query_text)
             if embedding:
-                # 2. Query Supabase using cosine similarity RPC
-                # We expect a Supabase RPC function named 'match_advisories' to be defined
-                # or we can query the table directly if needed.
-                # However, raw select cannot do vector distance unless using RPC or custom raw SQL.
-                # Let's call the 'match_advisories' RPC function
                 from database import supabase_client
 
                 if supabase_client:
@@ -120,5 +128,9 @@ def query_pest_advisory(query_text: str) -> Optional[dict[str, Any]]:
         except Exception as e:
             print(f"Supabase RAG query failed: {e}. Falling back to local search.")
 
-    # Fallback to local search
     return query_pest_advisory_local(query_text)
+
+
+async def query_pest_advisory_async(query_text: str) -> Optional[dict[str, Any]]:
+    """Non-blocking async entrypoint for pest advisory queries."""
+    return await asyncio.to_thread(query_pest_advisory, query_text)
