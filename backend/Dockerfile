@@ -66,15 +66,22 @@ RUN adduser \
     --uid "${UID}" \
     appuser
 
+# Environment variables for production runtime
+ENV PATH="/app/.venv/bin:$PATH"
+ENV UV_CACHE_DIR="/tmp/uv-cache"
+ENV PYTHONUNBUFFERED=1
+
 # Copy the application and virtual environment with correct ownership in a single layer
 # This avoids expensive recursive chown and excludes build tools from the final image
 COPY --from=build --chown=appuser:appuser /app /app
+
+# Ensure cache directory is writable by appuser
+RUN mkdir -p /tmp/uv-cache && chown -R appuser:appuser /tmp/uv-cache /app
 
 # Switch to the non-privileged user for all subsequent operations
 # This improves security by not running as root
 USER appuser
 
-# Run the AgentServer using UV
-# UV will activate the virtual environment and run the agent.
+# Run the AgentServer directly using Python in the virtual environment
 # The "start" command tells the AgentServer to connect to LiveKit and begin waiting for jobs.
-CMD ["uv", "run", "python", "src/agent.py", "start"]
+CMD ["python", "src/agent.py", "start"]
