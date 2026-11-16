@@ -44,6 +44,10 @@ RUN uv sync --locked
 # (Excludes files specified in .dockerignore)
 COPY . .
 
+# Set model cache directories inside the application directory so they persist across build stages
+ENV HF_HOME="/app/models/huggingface"
+ENV TORCH_HOME="/app/models/torch"
+
 # Pre-download any ML models or files the agent needs
 # This ensures the container is ready to run immediately without downloading
 # dependencies at runtime, which improves startup time and reliability
@@ -69,6 +73,8 @@ RUN adduser \
 # Environment variables for production runtime
 ENV PATH="/app/.venv/bin:$PATH"
 ENV UV_CACHE_DIR="/tmp/uv-cache"
+ENV HF_HOME="/app/models/huggingface"
+ENV TORCH_HOME="/app/models/torch"
 ENV PYTHONUNBUFFERED=1
 
 # Copy the application and virtual environment with correct ownership in a single layer

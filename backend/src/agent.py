@@ -40,37 +40,6 @@ load_dotenv(".env.local")
 
 app_logger = logging.getLogger("krushi_mitra")
 
-
-def _start_background_health_server():
-    """Start a lightweight HTTP health-check server for cloud platforms like Render."""
-    port_str = os.getenv("PORT")
-    if not port_str:
-        return
-    try:
-        port = int(port_str)
-        import threading
-        from http.server import BaseHTTPRequestHandler, HTTPServer
-
-        class HealthCheckHandler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"status":"healthy","service":"krushi-mitra"}\n')
-
-            def log_message(self, format, *args):
-                pass  # Keep standard logs clean
-
-        httpd = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        app_logger.info("Render HTTP health check server listening on port %d", port)
-    except Exception as e:
-        app_logger.warning("Could not start health check server on port %s: %s", port_str, e)
-
-
-_start_background_health_server()
-
 # In-memory cache for static mandi prices dataset to eliminate synchronous file IO
 _MANDI_PRICES_CACHE: dict | None = None
 
