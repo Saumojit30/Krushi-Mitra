@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Krushi Mitra — Main Voice Agent
 Cotton Farmer Advisory | Vidarbha, Maharashtra | Track: Farm & Field
