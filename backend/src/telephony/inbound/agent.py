@@ -1018,7 +1018,9 @@ class CottonMarketSpecialist(Agent):
         return "Transferred successfully to the Cotton Pest & Disease Specialist."
 
 
-server = AgentServer()
+# Bind the agent's internal HTTP health server to dynamic PORT (defaults to 8081)
+server_port = int(os.getenv("PORT", "8081"))
+server = AgentServer(port=server_port)
 
 
 def prewarm(proc: JobProcess):
