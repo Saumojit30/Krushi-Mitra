@@ -59,12 +59,13 @@ flowchart TD
         E -->|Streaming PCM Audio| F["STT: Deepgram Nova-3 (Sub-250ms) / Whisper-1"]
         F -->|Streamed Tokens + Preemptive Gen| G["LLM: Groq (openai/gpt-oss-20b) / Gemini 3 Series"]
         
-        G <-- Async Tool Calls --> H["Tool Ecosystem and Async TTL Cache"]
-        H <--> I1["Open-Meteo Soil and ET0 API (FAO-56)"]
-        H <--> I2["Open-Meteo 3-Day Weather API"]
-        H <--> I3["Agmarknet APMC Mandi Dataset (Cotton/Soy/Tur)"]
-        H <--> I4["KVK Human Escalation Engine"]
-        H <--> I5["Local RAG: CIB Verified Pest DB"]
+        G -->|Async Tool Calls| H["Tool Ecosystem and Async TTL Cache"]
+        H --> G
+        H --> I1["Open-Meteo Soil and ET0 API (FAO-56)"]
+        H --> I2["Open-Meteo 3-Day Weather API"]
+        H --> I3["Agmarknet APMC Mandi Dataset (Cotton/Soy/Tur)"]
+        H --> I4["KVK Human Escalation Engine"]
+        H --> I5["Local RAG: CIB Verified Pest DB"]
         
         G -->|Sentence Token Chunk (min_len=1)| J["TTS: Murf Falcon 2 GEN2 (Marathi mr-IN-shilpa)"]
         J -->|Streamed 24kHz Opus Audio| K["Full-Duplex Audio Playback (sub-600ms e2e)"]
